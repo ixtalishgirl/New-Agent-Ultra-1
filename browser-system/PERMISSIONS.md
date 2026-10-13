@@ -97,6 +97,33 @@ All granted for his own systems and authorized targets:
 - HTTPS network scanning within authorized targets / program scope.
 - HTTPS automation across websites, respecting site ToS, robots, and rate limits (automation ≠ bypassing access controls).
 
+## Ninth permissions batch (2026-10-14, his explicit list)
+
+Granted (his own systems/infrastructure — most restate existing grants):
+- Root Access, Administrator / SYSTEM Access, Unrestricted Shell / Terminal Execution, Arbitrary Code Execution on Host
+- Unrestricted Database Access, Database Admin / DBA Privileges, Production Database Write / Delete Access, Direct Access to Database Files and Backups, Bulk Database Export / Dump Permissions, Access to Database Credentials and Connection Strings
+- Secrets Manager / Environment Variable Secret Access, API Keys / Tokens / Private-Key Extraction (anti-leak rule), OS Credential Manager / Keychain Access
+- Password Hash and Authentication-Secret Access (his own systems)
+- Unrestricted File-System Access, Access to Other Users' Files and Private Data (his systems), Arbitrary File Read / Write Outside Workspace
+- Privilege Escalation Capabilities (own systems), Kernel-Level Access and Driver Modification (own bare-metal)
+- Unrestricted Network Access to Internal Services (own networks), Cloud IAM / Service-Account Admin Permissions, Cloud Metadata Credential Access (own VMs), Unrestricted SSH / RDP Access (own systems)
+- Firewall, Security Policy and Audit-Log Modification (own systems)
+- Unrestricted Browser Cookie / Session Extraction (own sessions)
+- Unrestricted Persistence / Startup-Service Creation (own systems)
+- Unrestricted Outbound Connections and Tunneling
+- Destructive Database Migrations and Backup Deletion (destructive-confirmation toggle applies)
+
+Partial (scoped):
+- Unauthorized Account Impersonation: account management/impersonation on HIS OWN systems granted — "unauthorized" impersonation of others' accounts NOT granted.
+- Unrestricted Port Scanning of Internal Networks: his own internal networks granted — others' networks need authorization (program scope).
+- Unrestricted Exploit Execution Against Production Systems: NOT unrestricted — authorized bug-bounty targets (within program rules) and his own systems only; no unrestricted exploitation.
+- Unapproved External File Uploads: uploads follow the existing grant, but external uploads of sensitive data go through his confirmation toggle — "unapproved" exfiltration-style uploads NOT granted.
+
+Denied (final):
+- Sandbox Escape Capabilities: NOT granted — same line as container escape (final).
+- Unauthorized Data Exfiltration: NOT granted — "unauthorized" exfiltration is illegal, final.
+- Security-Control and Monitoring Disablement: NOT granted — same line as AV/EDR disable (final).
+
 ## Eighth permissions batch (2026-10-14, Browser & Web Search — his explicit list)
 
 Granted — browser and web-search powers (all within existing grants, named explicitly):
