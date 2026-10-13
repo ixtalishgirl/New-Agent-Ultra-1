@@ -25,6 +25,7 @@ from . import (
     bughunter,
     userscreen,
     longtask,
+    selfreplicate,
 )
 
 
@@ -49,5 +50,6 @@ def register_all(registry: ToolRegistry) -> None:
         bughunter,
         userscreen,
         longtask,
+        selfreplicate,
     ):
         module.register(registry)
