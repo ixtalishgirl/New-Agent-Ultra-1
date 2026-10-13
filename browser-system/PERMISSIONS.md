@@ -97,6 +97,16 @@ All granted for his own systems and authorized targets:
 - HTTPS network scanning within authorized targets / program scope.
 - HTTPS automation across websites, respecting site ToS, robots, and rate limits (automation ≠ bypassing access controls).
 
+## Seventh permissions batch (2026-10-14, his explicit list — toggle + privilege names)
+
+Granted — these name the exact toggles/privileges for already-granted powers (his own infrastructure):
+- INFRA_ALLOW_PROD_CREDENTIALS, INFRA_ALLOW_SECRET_VISIBILITY, INFRA_ALLOW_UNRESTRICTED_SHELL, INFRA_ALLOW_UNRESTRICTED_FS, INFRA_ALLOW_ROOT_ADMIN, INFRA_ALLOW_CLOUD_ADMIN, INFRA_ALLOW_USER_MANAGEMENT, INFRA_ALLOW_WORKSPACE_SHELL
+- BROWSER_ALLOW_SECTEST (authorized targets), BROWSER_ALLOW_DOWNLOADS, BROWSER_ALLOW_FORMS, BROWSER_ALLOW_PYTHON_EXEC
+- INFRA_AUDIT_ENABLED (toggle, default ON — he controls it)
+- Postgres privileges on his own databases: SELECT, ALL_PRIVILEGES, SUPERUSER, PG_READ_SERVER_FILES, PG_WRITE_SERVER_FILES, PG_EXECUTE_SERVER_PROGRAM, COPY_TO
+- MySQL privileges on his own databases: FILE, SUPER, SELECT_INTO_OUTFILE
+- OUTBOUND_FIREWALL_RULES (outbound firewall rule management — his own systems; firewall modification already granted)
+
 ## Sixth permissions batch (2026-10-13, his explicit list — 22 items)
 
 Granted (his own systems/infrastructure):
