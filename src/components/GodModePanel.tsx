@@ -126,7 +126,7 @@ export const GodModePanel: React.FC = () => {
         {godMode && (
           <div className="mt-3 pt-3 border-t border-amber-500/20 grid grid-cols-2 gap-2 text-[11px]">
             <div className="flex items-center gap-1.5 text-amber-300"><CheckCircle2 className="w-3.5 h-3.5" /> Tools: no confirm prompts</div>
-            <div className="flex items-center gap-1.5 text-amber-300"><CheckCircle2 className="w-3.5 h-3.5" /> Terminal: 10 min timeout</div>
+            <div className="flex items-center gap-1.5 text-amber-300"><CheckCircle2 className="w-3.5 h-3.5" /> Terminal: 55s max (serverless limit)</div>
             <div className="flex items-center gap-1.5 text-amber-300"><CheckCircle2 className="w-3.5 h-3.5" /> Batch file ops enabled</div>
             <div className="flex items-center gap-1.5 text-amber-300"><CheckCircle2 className="w-3.5 h-3.5" /> Full system dashboard</div>
           </div>
