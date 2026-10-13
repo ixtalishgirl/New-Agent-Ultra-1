@@ -85,6 +85,18 @@ Reaffirmed denials (final):
 - Security tool / antivirus / EDR disable: NOT granted (firewall rule modification itself remains granted).
 - Production billing / subscription fraud on third-party systems: NOT granted.
 
+## HTTPS-specific permissions (2026-10-13, clarifying the general web grant)
+
+All granted for his own systems and authorized targets:
+- Unrestricted HTTP/HTTPS requests, HTTPS domain access, private/internal network HTTPS access, HTTPS to localhost / private IPs / cloud services.
+- Cloud metadata endpoint access (his own cloud VMs; SSRF guard applies to external targets).
+- Unrestricted HTTPS file upload, form submission, API access, redirect following, webhook execution, authenticated requests, session/cookie-based access, proxy/tunnel access, WSS (WebSocket) access, cross-domain requests.
+- HTTPS download-and-execute.
+- HTTPS access to admin panels and production APIs of HIS OWN systems/services.
+- HTTPS database/API gateways, requests with privileged tokens (his tokens).
+- HTTPS network scanning within authorized targets / program scope.
+- HTTPS automation across websites, respecting site ToS, robots, and rate limits (automation ≠ bypassing access controls).
+
 ## Hard boundary (never overridden by the above)
 
 - Permissions remain within **authorized targets and program scope only**.
