@@ -356,3 +356,73 @@ async def ws_status(ws: WebSocket, task_id: str):
         subs = _subscribers.get(task_id, [])
         if q in subs:
             subs.remove(q)
+
+
+# ---------- websocket: telepathy chat — real-time, always-on ----------
+
+# session_id -> websocket (telepathy connections)
+_telepathy: Dict[str, WebSocket] = {}
+
+
+@app.websocket("/ws/telepathy/{session_id}")
+async def ws_telepathy(ws: WebSocket, session_id: str):
+    """Telepathy mode: real-time bidirectional chat. Always-on connection.
+
+    The user connects once and stays connected — messages flow instantly
+    both ways, like telepathy. No polling, no refresh, just instant.
+
+    Protocol:
+      Client -> {"type": "message", "text": "...", "task_id": "..."}
+      Client -> {"type": "ping"}
+      Server -> {"type": "message", "text": "...", "from": "agent"}
+      Server -> {"type": "vision", "data_base64": "..."} (agent's eyes)
+      Server -> {"type": "pong"}
+      Server -> {"type": "status", "connected": true}
+    """
+    await ws.accept()
+    _telepathy[session_id] = ws
+    await ws.send_text(json.dumps({"type": "status", "connected": True,
+                                   "session_id": session_id,
+                                   "mode": "telepathy",
+                                   "vision": "ALWAYS_ON"}))
+    try:
+        while True:
+            raw = await ws.receive_text()
+            try:
+                msg = json.loads(raw)
+            except Exception:
+                continue
+            mtype = msg.get("type")
+            if mtype == "ping":
+                await ws.send_text(json.dumps({"type": "pong"}))
+            elif mtype == "message":
+                # Broadcast to task subscribers so the agent loop sees it.
+                # The model layer picks this up as a new user message.
+                task_id = msg.get("task_id", "system")
+                await emit(task_id, {"event": "telepathy_message",
+                                     "session_id": session_id,
+                                     "text": msg.get("text", "")})
+                # Echo acknowledgment (the real reply comes via the agent loop)
+                await ws.send_text(json.dumps({"type": "ack",
+                                               "received": True}))
+            elif mtype == "vision_request":
+                # User asks: "what do you see?" — send latest vision frame
+                from vision_core import stats as _vstats
+                await ws.send_text(json.dumps({"type": "vision_status",
+                                               **_vstats()}))
+    except WebSocketDisconnect:
+        pass
+    finally:
+        _telepathy.pop(session_id, None)
+
+
+async def telepathy_broadcast(payload: Dict[str, Any]) -> None:
+    """Send a message to ALL telepathy-connected users."""
+    dead = []
+    for sid, ws in _telepathy.items():
+        try:
+            await ws.send_text(json.dumps(payload))
+        except Exception:
+            dead.append(sid)
+    for sid in dead:
+        _telepathy.pop(sid, None)
