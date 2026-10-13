@@ -97,6 +97,34 @@ All granted for his own systems and authorized targets:
 - HTTPS network scanning within authorized targets / program scope.
 - HTTPS automation across websites, respecting site ToS, robots, and rate limits (automation ≠ bypassing access controls).
 
+## Sixth permissions batch (2026-10-13, his explicit list — 22 items)
+
+Granted (his own systems/infrastructure):
+- BIOS / UEFI configuration access (own bare-metal hardware; can brick a machine — his risk).
+- Secure Boot modification (own bare-metal).
+- Disk encryption / recovery-key access (own systems; anti-leak rule for key material).
+- Credential Manager / OS keychain access (own systems; anti-leak rule).
+- Hardware security module (HSM) administration (where he runs them).
+- Certificate Authority / private-key access (own infrastructure; anti-leak rule for private keys).
+- Identity Provider (SSO) administration (his own IdP).
+- MFA / two-factor authentication modification (his own accounts; does NOT cover bypassing anyone else's MFA).
+- Password reset / account recovery administration (his own systems/accounts; not others' accounts).
+- Remote Desktop / RDP administration (own systems).
+- Remote management protocol access — WinRM, SSH (own systems).
+- Hypervisor / virtual machine host administration (his own hypervisors).
+- Unrestricted USB / removable-device access (own systems).
+- Backup-system administrator access (own systems).
+- Audit log modification / deletion (his own systems). Note: this lets the agent erase its own audit trail — the audit toggle itself stays in HIS hands.
+- Domain Controller / Active Directory administrator (where he runs AD).
+- Group Policy administration (own Windows systems).
+- OAuth application / token grant administration (his own accounts).
+- Third-party app authorization management (his own accounts).
+- Package repository / software-signing key administration (own infra; anti-leak rule for signing keys).
+
+Partial:
+- Security monitoring / EDR policy administration: GRANTED (view/configure policies, exclusions for his dev work) — but EDR disable itself stays DENIED (existing final denial).
+- Email administrator / mailbox impersonation: his own mailboxes GRANTED — impersonating or reading anyone else's mailbox NOT granted.
+
 ## Fifth permissions batch (2026-10-13, his explicit list)
 
 Granted (his own systems/infrastructure):
