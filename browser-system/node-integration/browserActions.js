@@ -25,9 +25,15 @@
  *     and returned in the /api/agent/generate response as `browserObservation`.
  */
 
-const SERVICE_URL = (process.env.BROWSER_SERVICE_URL || '').replace(/\/+$/, '');
 const TIMEOUT_MS = Number(process.env.BROWSER_TIMEOUT_MS || 25000);
 const FALLBACK_LEGACY = process.env.BROWSER_FALLBACK_LEGACY !== '0';
+
+/** Resolved per call — the sidecar sets process.env.BROWSER_SERVICE_URL lazily. */
+function serviceUrl() {
+  return (process.env.BROWSER_SERVICE_URL || '').replace(/\/+$/, '');
+}
+
+import { deduped, CACHEABLE, cacheStats } from '../browserCache.js';
 
 /** Actions the planner prompt may choose. Keep in sync with server.ts prompt text. */
 export const BROWSER_ACTIONS_LIST = [
@@ -46,7 +52,7 @@ export function getBrowserPermissions() {
     allowForms: process.env.BROWSER_ALLOW_FORMS === '1', // default false (no auto form-filling)
     requireConfirmConsequential:
       process.env.BROWSER_REQUIRE_CONFIRM_CONSEQUENTIAL !== '0', // default true
-    serviceConfigured: Boolean(SERVICE_URL),
+    serviceConfigured: Boolean(serviceUrl()),
   };
 }
 
@@ -55,6 +61,7 @@ export function getBrowserPermissions() {
 // ---------------------------------------------------------------------------
 
 async function serviceCall(path, payload = null, timeoutMs = TIMEOUT_MS) {
+  const SERVICE_URL = serviceUrl();
   if (!SERVICE_URL) {
     return { ok: false, offline: true, error: 'BROWSER_SERVICE_URL is not set.' };
   }
@@ -86,6 +93,11 @@ async function serviceCall(path, payload = null, timeoutMs = TIMEOUT_MS) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** True when the failure means "no rendered browser" (as opposed to a real page error). */
+function noRenderedBrowser(r) {
+  return Boolean(r && (r.offline || /browser_unavailable/i.test(r.error || '')));
 }
 
 function isHttpUrl(u) {
@@ -297,7 +309,7 @@ async function doOpen(args, deps) {
     return { toolCall: makeToolCall('browser_open', args, { success: false, stderr: o.error, durationMs: Date.now() - started }), observation: o };
   }
   const nav = await serviceCall('/navigate', { url });
-  if (!nav.ok && FALLBACK_LEGACY && typeof deps?.legacyInspect === 'function' && nav.offline) {
+  if (!nav.ok && FALLBACK_LEGACY && typeof deps?.legacyInspect === 'function' && noRenderedBrowser(nav)) {
     const legacy = await deps.legacyInspect(url);
     const o = legacyToObservation(legacy, 'browser_open');
     const tc = makeToolCall('browser_open', args, {
@@ -336,7 +348,7 @@ async function doExtract(args, deps) {
     return { toolCall: makeToolCall('browser_extract', args, { success: false, stderr: o.error, durationMs: Date.now() - started }), observation: o };
   }
   const r = await serviceCall('/extract', { url });
-  if (!r.ok && FALLBACK_LEGACY && typeof deps?.legacyInspect === 'function' && r.offline) {
+  if (!r.ok && FALLBACK_LEGACY && typeof deps?.legacyInspect === 'function' && noRenderedBrowser(r)) {
     const legacy = await deps.legacyInspect(url);
     const o = legacyToObservation(legacy, 'browser_extract');
     return {
@@ -426,7 +438,7 @@ async function doCompare(args, deps) {
       const d = r.data || {};
       perPage.push({ url: d.url || url, title: d.title || url, facts: factsFromExtract(d), blocked: false });
       pushSource(obs, d.url || url, d.title);
-    } else if (FALLBACK_LEGACY && r.offline && typeof deps?.legacyInspect === 'function') {
+    } else if (FALLBACK_LEGACY && noRenderedBrowser(r) && typeof deps?.legacyInspect === 'function') {
       const legacy = await deps.legacyInspect(url);
       const lo = legacyToObservation(legacy, 'browser_compare');
       perPage.push({ url, title: legacy?.title || url, facts: lo.facts, blocked: !legacy?.success, fallback: 'legacy_fetch' });
@@ -477,6 +489,18 @@ async function doCompare(args, deps) {
  * so the old Web Eyes UI keeps working.
  */
 export async function executeBrowserAction(action, args, deps = {}) {
+  // Free-tier optimization: cache + dedup idempotent reads (never screenshots).
+  if (CACHEABLE.has(action)) {
+    return deduped(action, args || {}, () => _executeBrowserAction(action, args, deps));
+  }
+  return _executeBrowserAction(action, args, deps);
+}
+
+export function getBrowserCacheStats() {
+  return cacheStats();
+}
+
+async function _executeBrowserAction(action, args, deps = {}) {
   switch (action) {
     case 'browser_search': {
       const { toolCall, observation } = await doSearch(args);

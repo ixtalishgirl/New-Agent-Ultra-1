@@ -87,7 +87,8 @@ async def lifespan(app: FastAPI):
     register_all(registry)
     if settings.enable_history:
         history = HistoryStore(settings.history_db_path)
-    await manager.start()
+    # NOTE: browser is LAZY — manager.ensure_started() launches Chromium on the
+    # first browser-needing tool call (free-tier: no 300MB RAM cost at boot).
     yield
     await manager.stop()
 

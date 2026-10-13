@@ -212,6 +212,179 @@ export const NATIVE_TOOL_SCHEMAS = [
       required: ['tool_name'],
     },
   },
+  // --- Live browser tools (served by the Python browser service via /api/browser/*) ---
+  {
+    name: 'browser_search',
+    description: 'Live web search (no API key). Returns title/url/snippet results with sources.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query.' },
+        maxResults: { type: 'number', description: 'Max results (default 8, max 20).' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'browser_open',
+    description: 'Open a URL in the live browser and read its visible content.',
+    parameters: {
+      type: 'object',
+      properties: { url: { type: 'string', description: 'http(s) URL to open.' } },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'browser_extract',
+    description: 'Extract text, headings, links, tables and facts from a live page.',
+    parameters: {
+      type: 'object',
+      properties: { url: { type: 'string', description: 'http(s) URL to extract.' } },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'browser_screenshot',
+    description: 'Capture a live screenshot of a page (needs the rendered browser).',
+    parameters: {
+      type: 'object',
+      properties: { url: { type: 'string', description: 'http(s) URL to screenshot.' } },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'browser_compare',
+    description: 'Open 2-5 pages and compare their content side by side with sources.',
+    parameters: {
+      type: 'object',
+      properties: {
+        urls: { type: 'array', items: { type: 'string' }, description: '2-5 http(s) URLs.' },
+      },
+      required: ['urls'],
+    },
+  },
+  // --- Recon tools (passive unrestricted; active = authorized targets only) ---
+  {
+    name: 'dns_records',
+    description: 'Passive DNS enumeration (A/AAAA/MX/TXT/NS/CNAME). Unrestricted.',
+    parameters: {
+      type: 'object',
+      properties: { target: { type: 'string', description: 'Domain or URL.' } },
+      required: ['target'],
+    },
+  },
+  {
+    name: 'whois_lookup',
+    description: 'Passive WHOIS via free RDAP. Unrestricted.',
+    parameters: {
+      type: 'object',
+      properties: { target: { type: 'string', description: 'Domain or URL.' } },
+      required: ['target'],
+    },
+  },
+  {
+    name: 'tls_cert',
+    description: 'Passive TLS certificate inspection (issuer, SANs, expiry, cipher). Unrestricted.',
+    parameters: {
+      type: 'object',
+      properties: { target: { type: 'string', description: 'Domain or URL.' } },
+      required: ['target'],
+    },
+  },
+  {
+    name: 'subdomain_enum',
+    description: 'Passive subdomain discovery via certificate transparency (crt.sh). Unrestricted.',
+    parameters: {
+      type: 'object',
+      properties: { target: { type: 'string', description: 'Domain.' } },
+      required: ['target'],
+    },
+  },
+  {
+    name: 'wayback_urls',
+    description: 'Passive archived-URL discovery via the Wayback Machine. Unrestricted.',
+    parameters: {
+      type: 'object',
+      properties: { target: { type: 'string', description: 'Domain.' } },
+      required: ['target'],
+    },
+  },
+  {
+    name: 'tech_fingerprint',
+    description: 'Passive technology fingerprinting (headers, meta, JS libraries). Unrestricted.',
+    parameters: {
+      type: 'object',
+      properties: { target: { type: 'string', description: 'URL.' } },
+      required: ['target'],
+    },
+  },
+  {
+    name: 'port_scan',
+    description: 'AUTHORIZED TARGETS ONLY: TCP port/service discovery. Out-of-scope targets are refused.',
+    parameters: {
+      type: 'object',
+      properties: { target: { type: 'string', description: 'Authorized target host.' } },
+      required: ['target'],
+    },
+  },
+  {
+    name: 'endpoint_discovery',
+    description: 'AUTHORIZED TARGETS ONLY: endpoint and parameter discovery. Out-of-scope targets are refused.',
+    parameters: {
+      type: 'object',
+      properties: { target: { type: 'string', description: 'Authorized target URL.' } },
+      required: ['target'],
+    },
+  },
+  // --- Security-testing tools (authorized targets / program scope ONLY) ---
+  {
+    name: 'xss_probe',
+    description: 'AUTHORIZED TARGETS ONLY: reflected-XSS canary probe (detection only).',
+    parameters: {
+      type: 'object',
+      properties: { url: { type: 'string', description: 'Authorized target URL with parameters.' } },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'sqli_probe',
+    description: 'AUTHORIZED TARGETS ONLY: SQLi detection — error-based, blind boolean-based, blind time-based (detection only).',
+    parameters: {
+      type: 'object',
+      properties: { url: { type: 'string', description: 'Authorized target URL with parameters.' } },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'ssrf_check',
+    description: 'AUTHORIZED TARGETS ONLY: in-band SSRF surface analysis.',
+    parameters: {
+      type: 'object',
+      properties: { url: { type: 'string', description: 'Authorized target URL.' } },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'idor_check',
+    description: 'AUTHORIZED TARGETS ONLY: IDOR pattern analysis (needs your own authorized test session).',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'Authorized target URL.' },
+        authorized_session_note: { type: 'string', description: 'Describe the authorized test session you control.' },
+      },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'csrf_check',
+    description: 'AUTHORIZED TARGETS ONLY: form analysis for missing/weak anti-CSRF tokens.',
+    parameters: {
+      type: 'object',
+      properties: { url: { type: 'string', description: 'Authorized target URL.' } },
+      required: ['url'],
+    },
+  },
 ];
 
 export interface ToolExecutionResult {

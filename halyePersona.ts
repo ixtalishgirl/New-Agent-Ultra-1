@@ -68,7 +68,24 @@ export const HALYE_PERSONA = '';
  * The model behaves freely without unsolicited prefixes or forced roles.
  */
 export function composeSystemInstruction(baseInstruction?: string): string {
-  return (baseInstruction || '').trim();
+  const base = (baseInstruction || '').trim();
+  const perms = loadPermissionsSummary();
+  return perms ? `${base}\n\n${perms}`.trim() : base;
+}
+
+// Compact permissions summary (browser-system/PERMISSIONS_SUMMARY.txt) —
+// so the model KNOWS its capabilities instead of guessing or re-asking.
+// Read once and cached; missing file = no block (never break the prompt).
+let _permsSummary: string | null | undefined;
+function loadPermissionsSummary(): string {
+  if (_permsSummary !== undefined) return _permsSummary || '';
+  try {
+    const p = path.resolve(process.cwd(), 'browser-system', 'PERMISSIONS_SUMMARY.txt');
+    _permsSummary = fs.existsSync(p) ? fs.readFileSync(p, 'utf-8').trim() : '';
+  } catch {
+    _permsSummary = '';
+  }
+  return _permsSummary || '';
 }
 
 export function describePersonaForSelfModel() {

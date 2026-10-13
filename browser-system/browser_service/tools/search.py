@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup
 
 from browser_manager import BrowserError
 from registry import ToolContext, ToolRegistry
+from ._common import client_kwargs as _common_client_kwargs
 
 SCHEMA: Dict[str, Any] = {
     "type": "object",
@@ -90,7 +91,8 @@ async def _handle(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
                    {"event": "search_start", "engine": engine, "query": query})
     try:
         async with httpx.AsyncClient(
-            timeout=30, follow_redirects=True, proxies=_proxies(ctx),
+            **_common_client_kwargs(_proxies(ctx)),
+            timeout=30, follow_redirects=True, trust_env=False,
             headers={"User-Agent": ctx.settings.user_agent},
         ) as client:
             resp = await client.get(url)

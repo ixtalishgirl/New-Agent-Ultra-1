@@ -1,49 +1,67 @@
 # IMPLEMENTATION_STATUS.md — honest per-feature status
 
-As of 2026-10-13. Status words mean exactly this:
+As of 2026-10-13 (deep in-app integration pass). Status words mean exactly this:
 
-- **WORKING** — code complete and actually exercised (unit tests run, or
-  builder-recorded local runs). Not the same as "deployed".
-- **NEEDS-LIVE-RUN** — written, not yet run against a live browser/network.
-- **NEEDS-EXTERNAL** — blocked on ahsan's decision, procurement, credential,
-  or an action only he (or the parent orchestrator) can take.
+- **WORKING** — code complete and actually exercised (tests run, or live local runs).
+- **NEEDS-LIVE-RUN** — written, not yet run against a live browser / real network.
+- **NEEDS-EXTERNAL** — blocked on ahsan's decision, procurement, or an action only he can take.
 
 ---
 
-## WORKING
+## WORKING (verified this pass)
 
 | Feature | Evidence |
 |---|---|
-| Vision pipeline — text-only fallback + injection guard | `vision/tests/test_pipeline.py`: **10 mocked tests PASS, 2 live skipped** (re-run by the docs assembler 2026-10-13 via `python3 -m unittest discover -s tests`: OK). Covers: empty-URL rejection, non-PNG rejection, text-only fallback labeling, `untrusted_page_content` tagging, injection-guard prompt, adapter error degradation, DOM element preservation |
-| Germany scripts — local logic | Builder-recorded LOCAL runs 2026-10-13: A1 (honest `appears German: no`, exit 1), A2 (`--json`), A3 (unreachable status URL → UNKNOWN, no crash), B1 (report_location backend row), D3 (no real credentials in repo). See `germany/tests/TEST_PLAN.md` |
-| Browser service — code complete | `app.py`, `registry.py`, `browser_manager.py`, `db.py`, 13 tool modules, Dockerfile, API.md — all written; imports verified structurally (not executed: needs live Chromium) |
-| Node integration — code complete | `browserActions.js` + `browserRoutes.js` + `.d.ts` shims + 6-hunk `INTEGRATION_PATCH.md` — written; **no test file exists for this layer** (see below) |
-| Chat panel — component complete | `BrowserPanel.tsx` (175 lines) + `CHAT_PATCH.md` — written; renders null-safe |
-| Docs | This folder: ARCHITECTURE, CONFIG, DEPENDENCIES, SECURITY, SETUP, TROUBLESHOOTING, CONTRACT_CHECK, RESPONSE_CONTRACT (pre-existing) |
+| Server wiring — /api/browser/*, /api/recon/run, /api/sectest/run, /api/permissions, /api/browser/health | `browser-system/server_wiring.js` mounted in root `server.ts`; live boot on :18099 — all endpoints respond |
+| Lazy Python sidecar (in-app, Render-free compatible) | `browser_sidecar.js`: PEP 668 handled, pip bootstrap, health-gated spawn, auto-restart w/ backoff; live run spawned service on :8080 |
+| Python browser service boots WITHOUT playwright | Optional playwright import; `/status` → `{playwright:false, browser_lazy:true}`; 30 tools registered (15 browser + 8 recon + 7 sectest) |
+| Lazy Chromium launch | `browser_manager.ensure_started()` — no browser RAM at boot; `browser_unavailable` honest error when it can't start |
+| httpx 0.28 compat + proxy hardening | `client_kwargs()` helper; `trust_env=False` (explicit config only); malformed proxy URLs dropped, not crashed |
+| Chat intent routing (server-side tool selection) | `detectBrowserIntent`: 7/7 unit cases pass (Roman Urdu + English + slash commands); `/api/model/chat` runs browser tools, enriches model prompt, serves browser results when model offline |
+| Legacy fetch fallback (widened) | Falls back when service offline OR browser unavailable; `fallbackUsed` labeled honestly |
+| Response cache + request dedup | `browserCache.js`: dedup + TTL cache verified (screenshots never cached) |
+| Scope guard (web targets) | Unauthorized sectest/recon → `scope_denied` (live-verified via /api/sectest/run → 403) |
+| Permission model (final) | `permissions.js` + `scope_guard.py`: full infra grant, shell model (container escape permanently denied), kernel bare-metal-only w/ honest container note, audit toggle (default ON), credential anti-leak (`sanitizeForChat`, `looksLikeCredentialPath`) |
+| Recon tools (8) | Registered; passive trio live-tested (DNS/TLS/fingerprint paths); active two scope-gated |
+| Sectest tools (7) | Registered; XSS/SQLi (error+blind boolean+blind time)/SSRF/IDOR/CSRF/Nmap/ZAP wrappers; all scope-checked |
+| Chat UI | `BrowserPanel.tsx` in `src/components/`, `browserObservation` on ChatMessage, render block + send-handler wiring; `tsc` + full `npm run build` pass |
+| Tool schemas for the model | 18 new schemas in `NATIVE_TOOL_SCHEMAS` (browser/recon/sectest) — the model sees what it can do |
+| Permissions in system prompt | `PERMISSIONS_SUMMARY.txt` injected via `composeSystemInstruction` — the model KNOWS its capabilities |
+| Flat shim contract | 18/18 offline tests pass (`tests/test_flat_shim.py`) |
+| E2E suite | `tests/e2e_live.mjs`: **7/7 pass** against live local app (health, browser health, search intent, open intent, recon, scope denial, permissions) |
+| Vision pipeline | 10 mocked tests pass (unchanged); Germany verify scripts live-tested (unchanged) |
 
-## NEEDS-LIVE-RUN
+## NEEDS-LIVE-RUN (written; needs real browser/network)
 
 | Feature | What it needs |
 |---|---|
-| `browser_service/tests/test_service.py` (207 lines, all 15 tools) | Running service + Playwright Chromium + network (example.com, duckduckgo.com). Marked NEEDS LIVE RUN by its own header |
-| `tests/test_screenshot_url.py` (new, this build) | Running service + network; captures real PNG + timestamped sidecar |
-| `tests/E2E_GERMAN_JOBS.md` (new, this build) | Reconciled contract + German egress + live browser delegation (subagents can't run a live browser) |
-| Vision live-model tests (2 tests) | `RUN_LIVE_VISION_TESTS=1` + a served VLM (`VISION_MODEL_URL`) |
-| Node integration behavior | No test file was written for `browserActions.js`/`browserRoutes.js`; needs a live service (post-reconciliation) to validate fallback, SSRF guard, permission toggles |
-| Germany TEST_PLAN remaining LOCAL items | A4, A8, A9, B2, C1, C2, D2 — runnable without German infra, not yet recorded |
+| Real Chromium rendering (navigate JS pages, screenshots) | A host where Chromium can launch: system deps + ~300MB RAM. NOT Render free (see verdict below). Try: his PC, Germany VPS |
+| `browser_service/tests/test_service.py` (all tools live) | Running service + Chromium + clean egress network |
+| `tests/test_screenshot_url.py` | Running service + Chromium |
+| `tests/E2E_GERMAN_JOBS.md` (arbeitsagentur.de) | German egress + live browser |
+| Vision against a real VLM | `VISION_MODEL_URL` (Kaggle Qwen2.5-VL or local Ollama) |
+| Sandbox-network flakiness | This dev sandbox's egress proxy breaks httpx intermittently (DDG 0-result flakes); Render has clean egress — re-verify there |
 
-## NEEDS-EXTERNAL (ahsan's decision / procurement / credentials)
+## NEEDS-EXTERNAL (ahsan's decisions)
 
 | Item | Blocked on |
 |---|---|
-| **Contract reconciliation** | Parent orchestrator decision: Option A (Python shim), B (Node rewrite), or C — see `CONTRACT_CHECK.md`. Then a builder implements it |
-| **German egress (real German IP)** | ahsan procures a German VPS (~€4–6/mo) or German proxy/VPN — or defers. Nothing purchased by this build. After procurement: TEST_PLAN A5–A7, B3, C3–C4 |
-| **Vision model serving** | His decision: Kaggle Qwen2.5-VL serving notebook (standing Kaggle boundary — only what he orders; his datasets/sessions untouched) **or** local Ollama `qwen2.5vl:7b`. Until then: text-only fallback (honest, labeled) |
-| **Applying the Node patch to the live repo** | Fresh GitHub PAT from him (pending — same PAT also gates the English-only fix). Patch targets `New-Agent-ulta/src/server.ts` |
-| **Applying the chat patch** | Same PAT; plus his decision on the wiring gap (see below) |
-| **Render redeploy** | After patches merge; note the browser service itself **cannot** run on Render free (see TROUBLESHOOTING.md) |
-| **`/status` + `egress_ip` on the browser service** | Needed by `verify_german_ip.py --status-url` (Germany A7). Part of reconciliation (Option A includes it) |
-| **Model endpoint for reasoning** | `HALEY_API_URL` (Kaggle) is still dead per the app status — the planner's reasoning calls depend on it. Separate from this system but the architecture assumes it |
+| German egress (real German IP) | He procures German VPS (~€4–6/mo) or proxy/VPN — or defers. Plumbing + `verify_german_ip.py` ready |
+| Vision model serving | His call: Kaggle Qwen2.5-VL notebook or local Ollama. Until then: text-only fallback (honest) |
+| Chromium-capable host | His call: his PC or a VPS. Render free cannot reliably run Chromium (see verdict) |
+| Push + Render redeploy | Parent pushes the local commits (no PAT on builder side); Render auto-deploys from main |
+
+## Honest verdicts
+
+**Chromium on Render free (0.1 CPU / 512MB): NOT RECOMMENDED.** The stack is built for graceful degradation: the service boots without playwright (~80MB), fetch-based tools (search/extract/recon/sectest) work fully, and browser tools fail honestly with `browser_unavailable` + legacy-fetch fallback for reading pages. Real screenshots/JS rendering need ~300MB + system libs — get a VPS or run the browser service on his PC (`BROWSER_SERVICE_URL` points the app at it, no code change).
+
+**Render sleep:** the sidecar respawns lazily on the next browser request after sleep (cold start 5–60s for pip check + service boot). No 24/7 promise — documented in `/api/browser/health`.
+
+**Model:** `/api/model/chat` now serves browser results even when the Kaggle model is offline (honest `modelOffline` flag) — the agent stays useful without the GPU.
+
+---
+
+## Previous build notes (kept for history)
 
 ## Known gaps vs ahsan's spec (said plainly)
 

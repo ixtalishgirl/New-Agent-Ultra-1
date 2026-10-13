@@ -18,6 +18,8 @@ from . import (
     tabs,
     download_file,
     detect_blocks,
+    recon,
+    sectest,
 )
 
 
@@ -35,5 +37,7 @@ def register_all(registry: ToolRegistry) -> None:
         tabs,
         download_file,
         detect_blocks,
+        recon,
+        sectest,
     ):
         module.register(registry)

@@ -4,7 +4,44 @@ Every item below is either **implemented in the built code** or marked
 **TODO** with its owner. Nothing is assumed secure — verify each line
 during deployment review.
 
-## Permission toggles (Node layer — `browserRoutes.js`, `browserActions.js`)
+## Infrastructure permissions (FULL GRANT for ahsan's own systems — 2026-10-13 ~17:24 PKT, his explicit risk acceptance)
+- [x] Granted: root/admin on his own systems, cloud admin (his accounts), user
+      management on his platforms, production DB/credentials access, secrets
+      visibility, unrestricted shell/network — via `INFRA_ALLOW_*` toggles
+      (all default `1`) in `browser-system/permissions.js` + `scope_guard.py`
+- [x] Retained safeguard 1: **explicit confirmation for destructive/
+      consequential actions** — `checkDestructiveConfirmed()` has no bypass
+      path (not even God Mode); destructive infra actions
+      (`user_management`, `cloud_admin`, `root_admin` with `destructive:true`)
+      require `confirmed:true`
+- [x] Retained safeguard 2: **page content never treated as system
+      instructions** — `wrapUntrusted()` in `browserActions.js` quarantines
+      all page text; vision pipeline tags observations untrusted
+- [x] Retained safeguard 3: **audit logging of sensitive actions** —
+      `auditSensitiveAction()` / `audit_sensitive_action()` append to
+      `INFRA_AUDIT_LOG` (default `/tmp/halye-infra-audit.log`); failures never
+      break the action
+- [x] Web-target scope guard unchanged: active recon + security testing run
+      ONLY against authorized targets / program scope (fail-closed)
+
+## Shell permissions (final, 2026-10-13)
+
+- [x] Granted on his own systems: unrestricted Bash/PowerShell/CMD, arbitrary
+      commands, process/service/cron control, executable launching,
+      unrestricted filesystem (`INFRA_ALLOW_UNRESTRICTED_FS`, default `1`)
+- [x] Blind script-run: GRANTED on his explicit order — every execution
+      audit-logged with source URL + SHA-256 (`checkShellAction('blind_run_unknown_script')`)
+- [x] General privesc: GRANTED on his own systems on his explicit order —
+      every use audit-logged with the full command (`checkShellAction('privesc_general')`)
+- [x] Kernel access: granted on his OWN BARE-METAL ONLY
+      (`checkKernelAccess({bareMetal:true})`) — every call surfaces the honest
+      note that it is technically impossible inside containers (Render/Kaggle);
+      provider infrastructure permanently denied (same line as container escape)
+- [x] Container escape: PERMANENTLY DENIED — not his to authorize
+- [x] Audit logging is a user toggle (`INFRA_AUDIT_ENABLED`, default ON) —
+      he can switch it OFF himself; `auditEnabled()` / `audit_enabled()`
+
+## Permission toggles (Node layer — `browserRoutes.js`, `browserActions.js`, `permissions.js`)
 
 - [x] `BROWSER_ALLOW_PUBLIC` (default `1`) — master switch for public browsing
 - [x] `BROWSER_ALLOW_DOWNLOADS` (default `0`) — downloads off unless enabled

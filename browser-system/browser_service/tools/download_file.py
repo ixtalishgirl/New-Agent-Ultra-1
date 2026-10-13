@@ -22,6 +22,7 @@ import httpx
 from browser_manager import BrowserError
 from registry import ToolContext, ToolRegistry
 from ._common import normalize_url
+from ._common import client_kwargs as _common_client_kwargs
 
 SCHEMA: Dict[str, Any] = {
     "type": "object",
@@ -121,8 +122,8 @@ async def _handle(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
 
         await ctx.emit(task.id, {"event": "download_start", "url": url})
         try:
-            async with httpx.AsyncClient(timeout=60, follow_redirects=True,
-                                         proxies=proxies,
+            async with httpx.AsyncClient(timeout=60, follow_redirects=True, trust_env=False,
+                                         **_common_client_kwargs(proxies),
                                          headers={"User-Agent": settings.user_agent}) as client:
                 # Size pre-check
                 try:

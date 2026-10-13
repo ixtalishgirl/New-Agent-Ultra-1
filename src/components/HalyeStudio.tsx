@@ -71,6 +71,7 @@ import { ProjectStudioView } from './ProjectStudioView';
 import { ScreenshotModal } from './ScreenshotModal';
 import { ActionHistoryCard } from './ActionHistoryCard';
 import { FullProcessModal } from './FullProcessModal';
+import { BrowserPanel } from './BrowserPanel';
 import { BLANK_CANVAS_CODE } from '../templates';
 
 /**
@@ -802,6 +803,9 @@ export const HalyeStudio: React.FC<HalyeStudioProps> = ({
         model: 'haley-v2',
         provider: 'custom',
         actionTaken: 'Haley model reply',
+        // Live-browser enrichment (present when the server detected a browse intent).
+        browserObservation: (data as any).browserObservation || undefined,
+        toolCalls: (data as any).toolCalls || undefined,
       };
 
       setConversation((prev) => [...prev, assistantMessage]);
@@ -1786,6 +1790,11 @@ export const HalyeStudio: React.FC<HalyeStudioProps> = ({
                       </span>
                     </div>
                   </div>
+                )}
+
+                {/* Live Browser Observation — real browsing / screenshots (new) */}
+                {msg.browserObservation && (
+                  <BrowserPanel observation={msg.browserObservation} />
                 )}
 
                 {/* ZIP Archive Inspection Card */}

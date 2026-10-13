@@ -113,6 +113,7 @@ export interface ChatMessage {
   terminalResult?: TerminalExecutionResult;
   visionAnalysis?: VisionAnalysisResult;
   webInspection?: WebInspectionResult;
+  browserObservation?: import('./components/BrowserPanel').BrowserObservation;
   zipInspection?: ZipInspectionResult;
   powerBuilt?: HalyePowerItem;
   fileCreated?: { path: string; name: string; size: number };

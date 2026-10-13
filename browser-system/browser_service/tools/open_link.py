@@ -7,7 +7,11 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+try:
+    from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+except Exception:  # fetch-only mode: playwright not installed
+    class PlaywrightTimeoutError(Exception):
+        pass
 
 from browser_manager import BrowserError, NavigationError, Task
 from registry import ToolContext, ToolRegistry

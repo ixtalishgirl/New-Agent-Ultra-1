@@ -22,6 +22,14 @@ import {
   execute_custom_tool,
   REGISTERED_CUSTOM_TOOLS,
 } from './agentSquadEngine';
+// Live-browser system (Playwright service + recon/sectest + chat intent routing).
+// Additive: mounts /api/browser/*, /api/recon/*, /api/sectest/* and enriches
+// /api/model/chat with server-side browser tool selection.
+import {
+  mountBrowserSystem,
+  runBrowserForChat,
+  formatBrowserOnlyReply,
+} from './browser-system/server_wiring.js';
 import {
   getSelfKnowledge,
   readTheme,
@@ -97,6 +105,14 @@ app.use((req: any, res: any, next: any) => {
   }
   return res.status(401).send(PASSWORD_PAGE);
 });
+
+// ---------------------------------------------------------------------------
+// Live-browser system (additive).
+// Mounts /api/browser/*, /api/browser/health, /api/recon/run, /api/sectest/run,
+// /api/permissions. The Python sidecar boots lazily on first browser request.
+// executeWebEyes is a hoisted function declaration — safe to reference here.
+// ---------------------------------------------------------------------------
+mountBrowserSystem(app, { legacyInspect: (executeWebEyes as any) });
 
 // ---------------------------------------------------------------------------
 // Python tool-runtime bootstrap
@@ -403,15 +419,41 @@ app.get('/api/model/test', async (_req, res) => {
 // POST /api/model/chat {prompt, max_tokens?} -> POST {base}/generate
 app.post('/api/model/chat', async (req, res) => {
   const base = getModelBaseUrl();
+  const prompt = String(req.body?.prompt || '').trim();
+  if (!prompt) {
+    return res.status(400).json({ success: false, error: 'prompt khaali hai.' });
+  }
+
+  // --- Live browser: server-side intent routing (additive) ---
+  // The model can't call tools itself, so the server detects browse intents
+  // ("search karo", URLs, "screenshot", "compare", ...) and runs the browser
+  // tools first. Cheap regex — the Python sidecar only boots when an intent hits.
+  let browser: any = null;
+  try {
+    browser = await runBrowserForChat(prompt, { legacyInspect: executeWebEyes as any });
+  } catch (err: any) {
+    browser = { intent: null, observation: null, error: String(err?.message || err) };
+  }
+  const modelPrompt = browser?.observationContext
+    ? `${prompt}\n\n${browser.observationContext}`
+    : prompt;
+
+  // Model missing + browser answered → serve live results honestly (no fake model text).
   if (!base || !/^https?:\/\//i.test(base)) {
+    if (browser?.observation) {
+      return res.json({
+        success: true,
+        response: formatBrowserOnlyReply(browser),
+        browserObservation: browser.observation,
+        toolCalls: browser.toolCall ? [browser.toolCall] : [],
+        modelOffline: true,
+        note: 'Model (Kaggle GPU) offline hai — browser ke live results de rahi hoon.',
+      });
+    }
     return res.status(400).json({
       success: false,
       error: 'HALEY_API_URL set karo — model URL missing hai. Vercel env vars me HALEY_API_URL add karo.',
     });
-  }
-  const prompt = String(req.body?.prompt || '').trim();
-  if (!prompt) {
-    return res.status(400).json({ success: false, error: 'prompt khaali hai.' });
   }
   const maxTokens = Math.max(16, Math.min(Number(req.body?.max_tokens) || 512, 4096));
   const startedAt = Date.now();
@@ -421,12 +463,22 @@ app.post('/api/model/chat', async (req, res) => {
     const r = await fetch(base + '/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: prompt.slice(0, 8000), max_tokens: maxTokens }),
+      body: JSON.stringify({ prompt: modelPrompt.slice(0, 8000), max_tokens: maxTokens }),
       signal: ctrl.signal,
     });
     clearTimeout(timer);
     const raw = await r.text();
     if (!r.ok) {
+      if (browser?.observation) {
+        return res.json({
+          success: true,
+          response: formatBrowserOnlyReply(browser),
+          browserObservation: browser.observation,
+          toolCalls: browser.toolCall ? [browser.toolCall] : [],
+          modelError: `Model error (HTTP ${r.status}): ${raw.slice(0, 300)}`,
+          latencyMs: Date.now() - startedAt,
+        });
+      }
       return res.status(502).json({
         success: false,
         url: base + '/generate',
@@ -445,8 +497,25 @@ app.post('/api/model/chat', async (req, res) => {
       prompt: prompt.slice(0, 200),
       response,
       latencyMs: Date.now() - startedAt,
+      // Live-browser enrichment (present only when a browse intent was detected).
+      browserObservation: browser?.observation || undefined,
+      toolCalls: browser?.toolCall ? [browser.toolCall] : undefined,
+      browserServiceMode: browser?.serviceMode || undefined,
     });
   } catch (err: any) {
+    // Model failed — but if the browser answered, serve its live results honestly.
+    if (browser?.observation) {
+      return res.json({
+        success: true,
+        response: formatBrowserOnlyReply(browser),
+        browserObservation: browser.observation,
+        toolCalls: browser.toolCall ? [browser.toolCall] : [],
+        modelError: err?.name === 'AbortError'
+          ? 'Model timeout (3 min) — tunnel band ya GPU busy ho sakta hai.'
+          : String(err?.message || err),
+        latencyMs: Date.now() - startedAt,
+      });
+    }
     res.status(502).json({
       success: false,
       url: base + '/generate',

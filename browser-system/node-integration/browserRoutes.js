@@ -19,8 +19,12 @@ import { lookup as dnsLookup } from 'dns/promises';
 
 const router = express.Router();
 
-const SERVICE_URL = (process.env.BROWSER_SERVICE_URL || '').replace(/\/+$/, '');
 const TIMEOUT_MS = Number(process.env.BROWSER_TIMEOUT_MS || 25000);
+
+/** Resolved per call — the sidecar sets process.env.BROWSER_SERVICE_URL lazily. */
+function serviceUrl() {
+  return (process.env.BROWSER_SERVICE_URL || '').replace(/\/+$/, '');
+}
 
 export function getBrowserPermissions() {
   return {
@@ -28,7 +32,7 @@ export function getBrowserPermissions() {
     allowDownloads: process.env.BROWSER_ALLOW_DOWNLOADS === '1',
     allowForms: process.env.BROWSER_ALLOW_FORMS === '1',
     requireConfirmConsequential: process.env.BROWSER_REQUIRE_CONFIRM_CONSEQUENTIAL !== '0',
-    serviceConfigured: Boolean(SERVICE_URL),
+    serviceConfigured: Boolean(serviceUrl()),
   };
 }
 
@@ -94,6 +98,7 @@ async function assertSafePublicUrl(raw) {
 }
 
 async function proxyToService(path, payload, res, { timeoutMs = TIMEOUT_MS } = {}) {
+  const SERVICE_URL = serviceUrl();
   if (!SERVICE_URL) {
     return res.status(503).json({
       success: false,
@@ -137,6 +142,7 @@ async function proxyToService(path, payload, res, { timeoutMs = TIMEOUT_MS } = {
 /** Health: is the live service up? What is permitted? */
 router.get('/status', async (_req, res) => {
   const perms = getBrowserPermissions();
+  const SERVICE_URL = serviceUrl();
   if (!SERVICE_URL) {
     return res.json({
       success: true,
@@ -180,6 +186,7 @@ router.get('/screenshot', async (req, res) => {
   try {
     const url = await assertSafePublicUrl(String(req.query.url || ''));
     const perms = getBrowserPermissions();
+    const SERVICE_URL = serviceUrl();
     if (!perms.allowPublic) return res.status(403).json({ success: false, error: 'Public browsing is disabled (BROWSER_ALLOW_PUBLIC=0).' });
     if (!SERVICE_URL) {
       return res.status(503).json({

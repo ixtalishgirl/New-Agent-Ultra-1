@@ -20,16 +20,25 @@ import uuid
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
-from playwright.async_api import (
-    Browser,
-    BrowserContext,
-    Page,
-    Playwright,
-    TimeoutError as PlaywrightTimeoutError,
-    async_playwright,
-)
-
 from config import Settings
+
+# Playwright is OPTIONAL at import time: the service must boot even when the
+# browser stack isn't installed (fetch-only mode: search/extract/recon work;
+# browser tools fail honestly with code='browser_unavailable').
+try:
+    from playwright.async_api import (
+        Browser,
+        BrowserContext,
+        Page,
+        Playwright,
+        TimeoutError as PlaywrightTimeoutError,
+        async_playwright,
+    )
+    _PLAYWRIGHT_IMPORT_ERROR: Optional[str] = None
+except Exception as e:  # pragma: no cover - environment dependent
+    Browser = BrowserContext = Page = Playwright = PlaywrightTimeoutError = None  # type: ignore
+    async_playwright = None  # type: ignore
+    _PLAYWRIGHT_IMPORT_ERROR = str(e)[:300]
 
 
 # ---------- errors ----------
@@ -107,7 +116,37 @@ class BrowserManager:
         self._browser: Optional[Browser] = None
         self._tasks: Dict[str, Task] = {}
         self._lock = asyncio.Lock()
+        self._start_lock = asyncio.Lock()
         self._janitor_task: Optional[asyncio.Task] = None
+        # Lazy-launch state (free-tier friendly: no Chromium RAM until first use).
+        self.browser_error: Optional[str] = None
+
+    async def ensure_started(self) -> None:
+        """Idempotent lazy browser launch. First browser-needing call pays the
+        cost; failures are recorded (browser_error) and raised as BrowserError
+        with code='browser_unavailable' instead of crashing the service."""
+        if self._browser is not None:
+            return
+        if async_playwright is None:
+            self.browser_error = (
+                f"playwright not installed ({_PLAYWRIGHT_IMPORT_ERROR}). "
+                "Fetch-based tools (search, extract, recon) still work.")
+            raise BrowserError(
+                "browser unavailable: playwright package not installed. "
+                "Fetch-based tools (search, extract, recon) still work.",
+                code="browser_unavailable")
+        async with self._start_lock:
+            if self._browser is not None:
+                return
+            try:
+                await self.start()
+                self.browser_error = None
+            except Exception as e:
+                self.browser_error = str(e)[:500]
+                raise BrowserError(
+                    f"browser unavailable: {self.browser_error}. "
+                    "Fetch-based tools (search, extract, recon) still work.",
+                    code="browser_unavailable") from e
 
     # ----- lifecycle -----
 
@@ -119,6 +158,8 @@ class BrowserManager:
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",  # needed in most Docker/VPS environments
                 "--disable-dev-shm-usage",  # /dev/shm is tiny in Docker
+                "--disable-gpu",  # free-tier: no GPU, saves RAM
+                "--disable-software-rasterizer",
             ],
         }
         if self.settings.slow_mo_ms:
@@ -182,6 +223,7 @@ class BrowserManager:
             new_id = task_id or f"task-{uuid.uuid4().hex[:12]}"
             if new_id in self._tasks:
                 raise BrowserError(f"task already exists: {new_id}", code="task_exists")
+            await self.ensure_started()  # lazy: first browser use launches Chromium
             assert self._browser is not None, "browser not started"
             context = await self._browser.new_context(
                 user_agent=self.settings.user_agent,

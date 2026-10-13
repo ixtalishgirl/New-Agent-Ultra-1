@@ -177,6 +177,9 @@ def register_flat_routes(
             "ok": True,
             "service": "browser-service",
             "playwright": getattr(manager, "_browser", None) is not None,
+            "browser_error": getattr(manager, "browser_error", None),
+            "browser_lazy": getattr(manager, "_browser", None) is None
+                            and not getattr(manager, "browser_error", None),
             "egress_ip": await _egress_ip(settings),
         }
 
