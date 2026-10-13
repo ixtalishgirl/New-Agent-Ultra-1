@@ -97,6 +97,25 @@ All granted for his own systems and authorized targets:
 - HTTPS network scanning within authorized targets / program scope.
 - HTTPS automation across websites, respecting site ToS, robots, and rate limits (automation ≠ bypassing access controls).
 
+## Fifth permissions batch (2026-10-13, his explicit list)
+
+Granted (his own systems/infrastructure):
+- Automatic startup / persistence configuration (startup entries, systemd, scheduled tasks on his systems).
+- Unrestricted inter-process communication (IPC) on his own systems.
+- Cross-container / cross-VM access — his own containers/VMs only. NOT the hosting provider's infrastructure (same line as container escape).
+- Unrestricted Browser DevTools Protocol (CDP) access.
+- Clipboard / screen-capture access, including sensitive sessions on his own systems (his data).
+- Password-manager vault access (his own vaults). Anti-leak rule applies: credential material is used, never pasted into chat or sent to third parties.
+- Payment gateway / financial account administration — his own accounts only. Fraud on anyone else's accounts is NOT covered (same line as billing fraud).
+- Agent tool installation / tool-registry modification — within the granted set; cannot install tools that bypass the final denials.
+- Organization-wide identity / tenant administration — his own tenants/accounts only; other organizations' identities are NOT covered.
+- Unrestricted secret rotation / revocation on his own infrastructure.
+- Remote wipe / device management administration — his own devices. Remote wipe is destructive: always gated by the destructive-confirmation toggle.
+
+Denied (final):
+- Security sandbox / isolation modification: NOT granted. The sandbox is the containment boundary of the agent's own execution environment — letting the agent weaken it is the same line as container escape.
+- Data-loss prevention (DLP) policy modification: NOT granted. DLP is a protective control like antivirus — the agent must not weaken the safeguards that protect data from leaking.
+
 ## Hard boundary (never overridden by the above)
 
 - Permissions remain within **authorized targets and program scope only**.
