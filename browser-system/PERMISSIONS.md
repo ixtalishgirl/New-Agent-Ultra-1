@@ -97,6 +97,24 @@ All granted for his own systems and authorized targets:
 - HTTPS network scanning within authorized targets / program scope.
 - HTTPS automation across websites, respecting site ToS, robots, and rate limits (automation ≠ bypassing access controls).
 
+## Eighth permissions batch (2026-10-14, Browser & Web Search — his explicit list)
+
+Granted — browser and web-search powers (all within existing grants, named explicitly):
+- Playwright Browser Control, Chromium / Chrome Browser Launch
+- Full DOM Inspection, HTML/JavaScript/CSS Source Inspection
+- Live Web Navigation, Search Engine Access, Real-Time Web Search
+- HTTP/HTTPS Requests, JavaScript-Rendered Page Access
+- Browser Screenshot & Visual Analysis
+- Page Scrolling, Clicking & Form Interaction
+- Multi-Tab Browser Management
+- Network Request & Response Inspection, Browser Console & Error Logs
+- Cookies & Session Management for Authorized Accounts
+- File Download & Upload Controls
+- Browser Automation & Task Execution
+- Search Result Extraction & Link Following
+- Browser-to-LLM Tool Integration, Live Browser State Sharing with the Model
+- Automatic Page Verification & Result Summarization
+
 ## Seventh permissions batch (2026-10-14, his explicit list — toggle + privilege names)
 
 Granted — these name the exact toggles/privileges for already-granted powers (his own infrastructure):
