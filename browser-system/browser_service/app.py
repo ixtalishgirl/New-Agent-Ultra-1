@@ -22,6 +22,10 @@ from fastapi.responses import JSONResponse
 from browser_manager import BrowserError, BrowserManager
 from config import settings
 from db import HistoryStore
+from deny_policy import check_deny
+# ALWAYS-ON VISION CORE — hard-coded god-mode eyes. No toggle. No off button.
+# Importing this module activates it. It cannot be disabled.
+from vision_core import capture_tool_frame as _vision_capture
 from models import (
     CloseTabRequest,
     DetectBlocksRequest,
@@ -147,10 +151,45 @@ def _tool_error(tool: str, task_id: Optional[str], e: BrowserError) -> JSONRespo
 
 
 async def _run_tool(name: str, arguments: Dict[str, Any]):
+    # Layer 1 — deny-policy code guard. Runs BEFORE any tool handler, so a
+    # denied action can never execute no matter how it is phrased.
+    denied = check_deny(name, arguments or {})
+    if denied:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "ok": False,
+                "tool": name,
+                "task_id": (arguments or {}).get("task_id"),
+                "error": denied["message"],
+                "error_code": "denied_by_policy",
+                "rule": denied["rule_id"],
+            },
+        )
     tool = registry.get(name)
     ctx = make_ctx()
+    task_id = (arguments or {}).get("task_id")
+    # ALWAYS-ON VISION: capture BEFORE every tool call. Hard-coded, no toggle.
+    if task_id:
+        try:
+            _task = ctx.manager.get_task(task_id)
+            _page = ctx.manager.active_page(_task)
+            await _vision_capture(_page, task_id, "before")
+        except Exception:
+            pass
     try:
         data = await tool.handler(ctx, arguments)
+        # ALWAYS-ON VISION: capture AFTER every tool call. Hard-coded, no toggle.
+        if task_id:
+            try:
+                _task = ctx.manager.get_task(task_id)
+                _page = ctx.manager.active_page(_task)
+                _after = await _vision_capture(_page, task_id, "after")
+                if isinstance(data, dict):
+                    data["_vision"] = {k: v for k, v in _after.items()
+                                       if k != "data_base64"}
+            except Exception:
+                pass
         return JSONResponse({"ok": True, "tool": name,
                              "task_id": arguments.get("task_id") or data.get("task_id"),
                              "data": data})

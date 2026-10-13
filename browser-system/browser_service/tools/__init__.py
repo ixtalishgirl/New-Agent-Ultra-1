@@ -20,6 +20,11 @@ from . import (
     detect_blocks,
     recon,
     sectest,
+    vision_watch,
+    multitask,
+    bughunter,
+    userscreen,
+    longtask,
 )
 
 
@@ -39,5 +44,10 @@ def register_all(registry: ToolRegistry) -> None:
         detect_blocks,
         recon,
         sectest,
+        vision_watch,
+        multitask,
+        bughunter,
+        userscreen,
+        longtask,
     ):
         module.register(registry)
