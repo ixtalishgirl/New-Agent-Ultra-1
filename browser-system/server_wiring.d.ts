@@ -26,6 +26,16 @@ export function checkShellAction(kind: string, opts?: any): { ok: boolean; reaso
 export function checkTargetScope(target: string): { ok: boolean; reason?: string; host?: string; matched?: string };
 export function checkDestructiveConfirmed(body: any): { ok: boolean; needsConfirmation?: boolean; reason?: string };
 export function auditSensitiveAction(action: string, details?: any): string;
+export interface MemorySaveResult { ok: boolean; skipped?: boolean; error?: string }
+export interface MemoryReadResult { ok: boolean; skipped?: boolean; entries: any[]; error?: string }
+export interface MemoryStatus { configured: boolean; backend: string; reachable: boolean | null }
+export interface SqlResult { ok: boolean; rows: any[]; rowCount: number; command?: string | null; error?: string; detail?: string }
+export function isSupabaseConfigured(): boolean;
+export function saveMemoryAsync(kind: string, content: any): void;
+export function getMemory(kind: string, limit?: number): Promise<MemoryReadResult>;
+export function getMemoryStatus(): Promise<MemoryStatus>;
+export function isDbUrlConfigured(): boolean;
+export function querySql(sql: string, params?: any[]): Promise<SqlResult>;
 declare const _default: {
   mountBrowserSystem: typeof mountBrowserSystem;
   detectBrowserIntent: typeof detectBrowserIntent;

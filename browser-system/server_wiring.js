@@ -37,6 +37,14 @@ import {
   checkShellAction,
   auditSensitiveAction,
 } from './permissions.js';
+import {
+  isSupabaseConfigured,
+  saveMemoryAsync,
+  getMemory,
+  getMemoryStatus,
+  isDbUrlConfigured,
+  querySql,
+} from './supabaseMemory.js';
 
 const SERVICE_TIMEOUT = Number(process.env.BROWSER_TIMEOUT_MS || 25000);
 
@@ -125,6 +133,17 @@ export async function runBrowserForChat(prompt, deps = {}) {
   const { toolCall, observation } = await executeBrowserAction(intent.action, intent.args, {
     legacyInspect: deps.legacyInspect,
   });
+  // Persist research to Supabase (fire-and-forget; SQLite stays the local fallback).
+  if (observation) {
+    saveMemoryAsync('research', {
+      source: 'chat_browser_intent',
+      action: intent.action,
+      url: observation.url || null,
+      title: observation.title || null,
+      facts: (observation.facts || []).slice(0, 10),
+      accessed_at: observation.accessedAt || new Date().toISOString(),
+    });
+  }
   return {
     intent,
     toolCall,
@@ -176,6 +195,15 @@ async function proxyToolCall(tool, args, res, { timeoutMs = SERVICE_TIMEOUT } = 
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) return res.status(502).json({ success: false, tool, error: `service HTTP ${r.status}`, detail: data });
+    // Persist research tool results to Supabase (fire-and-forget).
+    saveMemoryAsync('research', {
+      source: 'tool_call',
+      tool,
+      target: String(args?.target || args?.url || args?.query || '').slice(0, 300),
+      ok: true,
+      summary: JSON.stringify(data).slice(0, 2000),
+      accessed_at: new Date().toISOString(),
+    });
     return res.json({ success: true, tool, ...data });
   } catch (err) {
     return res.status(503).json({ success: false, tool, error: String(err?.message || err) });
@@ -244,6 +272,7 @@ export function mountBrowserSystem(app, deps = {}) {
       success: true,
       sidecar,
       service,
+      memory: await getMemoryStatus().catch(() => ({ configured: false, backend: 'unknown' })),
       permissions: getPermissions(),
       browserPermissions: getBrowserPermissions(),
       limits: {
@@ -298,6 +327,38 @@ export function mountBrowserSystem(app, deps = {}) {
     res.json({ success: true, ...scope });
   });
 
+  // Direct Postgres (DDL-capable) — only when SUPABASE_DB_URL is configured.
+  // Lets the agent create/manage its OWN tables. Every call is audit-logged;
+  // destructive statements (DROP / TRUNCATE / DELETE) need confirmed:true.
+  app.post('/api/db/query', async (req, res) => {
+    if (!isDbUrlConfigured()) {
+      return res.status(503).json({
+        success: false,
+        error: 'db_url_not_configured',
+        hint: 'Set SUPABASE_DB_URL in Render env vars (Supabase dashboard → Project Settings → Database → connection string). Never paste it in chat.',
+      });
+    }
+    const sql = String(req.body?.sql || '').trim();
+    const params = Array.isArray(req.body?.params) ? req.body.params : [];
+    if (!sql) return res.status(400).json({ success: false, error: 'sql (string) is required.' });
+    if (sql.length > 20000) return res.status(400).json({ success: false, error: 'sql too long (max 20000 chars).' });
+    const first = sql.replace(/^\(?\s*/, '').split(/\s+/)[0].toUpperCase();
+    const destructiveStmt = /^(DROP|TRUNCATE)$/.test(first) || /\bDELETE\b/i.test(sql);
+    if (destructiveStmt) {
+      const c = checkDestructiveConfirmed(req.body);
+      if (!c.ok) {
+        auditSensitiveAction('db_query_denied_destructive', { sql: sql.slice(0, 120) });
+        return res.status(409).json({ success: false, ...c, error: 'Destructive SQL needs explicit confirmation. Re-send with confirmed:true.' });
+      }
+    }
+    auditSensitiveAction('db_query', { first, sql: sql.slice(0, 200) });
+    const r = await querySql(sql, params);
+    if (!r.ok) return res.status(502).json({ success: false, ...r });
+    // Never leak more than a sane page of rows to chat.
+    const rows = r.rows.slice(0, 100);
+    return res.json({ success: true, command: r.command, rowCount: r.rowCount, rows, truncated: r.rows.length > 100 });
+  });
+
   return { detectBrowserIntent, runBrowserForChat };
 }
 
@@ -311,4 +372,22 @@ export default {
   checkTargetScope,
   checkDestructiveConfirmed,
   auditSensitiveAction,
+  // Persistent memory (Supabase; SQLite fallback when unconfigured).
+  isSupabaseConfigured,
+  saveMemoryAsync,
+  getMemory,
+  getMemoryStatus,
+  // Direct Postgres (DDL-capable) — only when SUPABASE_DB_URL is set.
+  isDbUrlConfigured,
+  querySql,
+};
+
+// Named re-exports (server.ts imports these by name; the .d.ts mirrors them).
+export {
+  isSupabaseConfigured,
+  saveMemoryAsync,
+  getMemory,
+  getMemoryStatus,
+  isDbUrlConfigured,
+  querySql,
 };

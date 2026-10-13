@@ -29,6 +29,7 @@ import {
   mountBrowserSystem,
   runBrowserForChat,
   formatBrowserOnlyReply,
+  saveMemoryAsync,
 } from './browser-system/server_wiring.js';
 import {
   getSelfKnowledge,
@@ -423,6 +424,11 @@ app.post('/api/model/chat', async (req, res) => {
   if (!prompt) {
     return res.status(400).json({ success: false, error: 'prompt khaali hai.' });
   }
+  // Persistent chat memory (Supabase; fire-and-forget, SQLite fallback when unconfigured).
+  const sessionId = String(req.body?.session_id || 'default').slice(0, 100);
+  const persistChat = (role: 'user' | 'assistant', content: string, extra: any = {}) =>
+    saveMemoryAsync('chat', { session_id: sessionId, role, content: String(content).slice(0, 8000), ...extra });
+  persistChat('user', prompt);
 
   // --- Live browser: server-side intent routing (additive) ---
   // The model can't call tools itself, so the server detects browse intents
@@ -441,9 +447,11 @@ app.post('/api/model/chat', async (req, res) => {
   // Model missing + browser answered → serve live results honestly (no fake model text).
   if (!base || !/^https?:\/\//i.test(base)) {
     if (browser?.observation) {
+      const reply = formatBrowserOnlyReply(browser);
+      persistChat('assistant', reply, { modelOffline: true });
       return res.json({
         success: true,
-        response: formatBrowserOnlyReply(browser),
+        response: reply,
         browserObservation: browser.observation,
         toolCalls: browser.toolCall ? [browser.toolCall] : [],
         modelOffline: true,
@@ -470,9 +478,11 @@ app.post('/api/model/chat', async (req, res) => {
     const raw = await r.text();
     if (!r.ok) {
       if (browser?.observation) {
+        const reply = formatBrowserOnlyReply(browser);
+        persistChat('assistant', reply, { modelError: true });
         return res.json({
           success: true,
-          response: formatBrowserOnlyReply(browser),
+          response: reply,
           browserObservation: browser.observation,
           toolCalls: browser.toolCall ? [browser.toolCall] : [],
           modelError: `Model error (HTTP ${r.status}): ${raw.slice(0, 300)}`,
@@ -491,6 +501,7 @@ app.post('/api/model/chat', async (req, res) => {
       const parsed = JSON.parse(raw);
       response = String(parsed.response ?? parsed.text ?? raw);
     } catch { /* plain text ok */ }
+    persistChat('assistant', response);
     res.json({
       success: true,
       url: base + '/generate',
@@ -505,9 +516,11 @@ app.post('/api/model/chat', async (req, res) => {
   } catch (err: any) {
     // Model failed — but if the browser answered, serve its live results honestly.
     if (browser?.observation) {
+      const reply = formatBrowserOnlyReply(browser);
+      persistChat('assistant', reply, { modelError: true });
       return res.json({
         success: true,
-        response: formatBrowserOnlyReply(browser),
+        response: reply,
         browserObservation: browser.observation,
         toolCalls: browser.toolCall ? [browser.toolCall] : [],
         modelError: err?.name === 'AbortError'

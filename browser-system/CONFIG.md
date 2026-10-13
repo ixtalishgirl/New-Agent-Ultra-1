@@ -89,6 +89,21 @@ From `germany/config/.env.germany.example` (copy to `.env.germany`, `chmod 600`)
 | `USE_FLAT_SHIM` | `1` = `tests/test_screenshot_url.py` exercises the flat shim contract (CONTRACT_CHECK.md Option A) instead of the implemented `/tools/*` API |
 | `RUN_LIVE_VISION_TESTS` | `1` = run live VLM tests in `vision/tests/` |
 
+## 7. Persistent memory — Supabase (optional, recommended)
+
+| Var | Meaning |
+|---|---|
+| `SUPABASE_URL` | Supabase project URL, e.g. `https://xyz.supabase.co` — enables cloud memory |
+| `SUPABASE_ANON_KEY` | Supabase anon (public) key — used for `agent_memory` reads/writes |
+| `SUPABASE_SERVICE_KEY` | Optional. Add later manually for privileged ops (never required) |
+| `SUPABASE_DB_URL` | **Optional.** Direct Postgres connection string — unlocks DDL (`CREATE TABLE` etc.) via `querySql()` / `POST /api/db/query`. The anon key cannot do DDL. **Set it yourself in Render env vars — never paste it in chat.** |
+| `SUPABASE_TIMEOUT_MS` | REST/SQL timeout, default `10000` |
+
+When unset: memory writes are skipped (one warning) and the Python service's
+SQLite history (`browser_service/db.py`) remains the local fallback — the app
+never crashes. See `SUPABASE.md`. Set these in the Render dashboard
+(Environment tab) — never commit keys to git.
+
 ## Minimal working configurations
 
 **Local dev, no Germany, no vision (fastest honest start):**
