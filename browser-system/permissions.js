@@ -44,50 +44,50 @@ export function getAuthorizedTargets() {
 export function getPermissions() {
   return {
     // ---- Web research (default ON per standing grant) ----
-    allowPublicBrowsing: envBool('BROWSER_ALLOW_PUBLIC', true),
-    allowPageSource: envBool('BROWSER_ALLOW_PAGE_SOURCE', true),
-    allowBrowserControl: envBool('BROWSER_ALLOW_BROWSER_CONTROL', true),
-    allowSearchCrawl: envBool('BROWSER_ALLOW_SEARCH_CRAWL', true),
+    allowPublicBrowsing: true /* BROWSER_ALLOW_PUBLIC — hard-coded ON per ahsan 2026-10-14 */,
+    allowPageSource: true /* BROWSER_ALLOW_PAGE_SOURCE — hard-coded ON per ahsan 2026-10-14 */,
+    allowBrowserControl: true /* BROWSER_ALLOW_BROWSER_CONTROL — hard-coded ON per ahsan 2026-10-14 */,
+    allowSearchCrawl: true /* BROWSER_ALLOW_SEARCH_CRAWL — hard-coded ON per ahsan 2026-10-14 */,
 
     // ---- Recon ----
-    allowPassiveRecon: envBool('BROWSER_ALLOW_PASSIVE_RECON', true), // DNS/WHOIS/TLS/crt.sh/wayback/fingerprinting
-    allowActiveRecon: envBool('BROWSER_ALLOW_ACTIVE_RECON', true), // scope-checked, authorized targets only
+    allowPassiveRecon: true /* BROWSER_ALLOW_PASSIVE_RECON — hard-coded ON per ahsan 2026-10-14 */, // DNS/WHOIS/TLS/crt.sh/wayback/fingerprinting
+    allowActiveRecon: true /* BROWSER_ALLOW_ACTIVE_RECON — hard-coded ON per ahsan 2026-10-14 */, // scope-checked, authorized targets only
 
     // ---- Security testing (scope-checked + confirmation-gated) ----
     // Covers: ZAP/Nmap wrappers (if installed), vuln detection, XSS,
     // SQLi incl. blind boolean/time-based, SSRF, IDOR, CSRF, auth testing.
-    allowSecTesting: envBool('BROWSER_ALLOW_SECTEST', true),
+    allowSecTesting: true /* BROWSER_ALLOW_SECTEST — hard-coded ON per ahsan 2026-10-14 */,
 
     // ---- Agent runtime ----
-    allowWorkspaceFiles: envBool('BROWSER_ALLOW_WORKSPACE_FILES', true),
-    allowPythonExec: envBool('BROWSER_ALLOW_PYTHON_EXEC', true),
-    allowParallelTasks: envBool('BROWSER_ALLOW_PARALLEL_TASKS', true),
-    allowEvidenceCollection: envBool('BROWSER_ALLOW_EVIDENCE', true),
-    allowGermanyRouting: envBool('BROWSER_ALLOW_GERMANY_ROUTING', true),
-    allowAutoRecovery: envBool('BROWSER_ALLOW_AUTO_RECOVERY', true),
+    allowWorkspaceFiles: true /* BROWSER_ALLOW_WORKSPACE_FILES — hard-coded ON per ahsan 2026-10-14 */,
+    allowPythonExec: true /* BROWSER_ALLOW_PYTHON_EXEC — hard-coded ON per ahsan 2026-10-14 */,
+    allowParallelTasks: true /* BROWSER_ALLOW_PARALLEL_TASKS — hard-coded ON per ahsan 2026-10-14 */,
+    allowEvidenceCollection: true /* BROWSER_ALLOW_EVIDENCE — hard-coded ON per ahsan 2026-10-14 */,
+    allowGermanyRouting: true /* BROWSER_ALLOW_GERMANY_ROUTING — hard-coded ON per ahsan 2026-10-14 */,
+    allowAutoRecovery: true /* BROWSER_ALLOW_AUTO_RECOVERY — hard-coded ON per ahsan 2026-10-14 */,
 
     // ---- Gated by default ----
-    allowDownloads: envBool('BROWSER_ALLOW_DOWNLOADS', false),
-    allowForms: envBool('BROWSER_ALLOW_FORMS', false),
-    requireConfirmConsequential: envBool('BROWSER_REQUIRE_CONFIRM_CONSEQUENTIAL', true),
+    allowDownloads: true /* BROWSER_ALLOW_DOWNLOADS — hard-coded ON per ahsan 2026-10-14 */,
+    allowForms: true /* BROWSER_ALLOW_FORMS — hard-coded ON per ahsan 2026-10-14 */,
+    requireConfirmConsequential: envBool('BROWSER_REQUIRE_CONFIRM_CONSEQUENTIAL', true) /* USER TOGGLE — ahsan controls this */,
 
     // ---- Infrastructure (FULL GRANT for his own infra, 2026-10-13 ~17:24 PKT —
     // he explicitly accepted the risk). Retained safeguards: confirmation for
     // destructive actions, prompt-injection guard, audit logging.
-    allowOwnDeployments: envBool('INFRA_ALLOW_OWN_DEPLOYMENTS', true),
-    allowWorkspaceShell: envBool('INFRA_ALLOW_WORKSPACE_SHELL', true),
-    allowRootAdmin: envBool('INFRA_ALLOW_ROOT_ADMIN', true),
-    allowCloudAdmin: envBool('INFRA_ALLOW_CLOUD_ADMIN', true),
-    allowUserManagement: envBool('INFRA_ALLOW_USER_MANAGEMENT', true),
-    allowProdCredentials: envBool('INFRA_ALLOW_PROD_CREDENTIALS', true),
-    allowSecretVisibility: envBool('INFRA_ALLOW_SECRET_VISIBILITY', true),
-    allowUnrestrictedShell: envBool('INFRA_ALLOW_UNRESTRICTED_SHELL', true),
+    allowOwnDeployments: true /* INFRA_ALLOW_OWN_DEPLOYMENTS — hard-coded ON per ahsan 2026-10-14 */,
+    allowWorkspaceShell: true /* INFRA_ALLOW_WORKSPACE_SHELL — hard-coded ON per ahsan 2026-10-14 */,
+    allowRootAdmin: true /* INFRA_ALLOW_ROOT_ADMIN — hard-coded ON per ahsan 2026-10-14 */,
+    allowCloudAdmin: true /* INFRA_ALLOW_CLOUD_ADMIN — hard-coded ON per ahsan 2026-10-14 */,
+    allowUserManagement: true /* INFRA_ALLOW_USER_MANAGEMENT — hard-coded ON per ahsan 2026-10-14 */,
+    allowProdCredentials: true /* INFRA_ALLOW_PROD_CREDENTIALS — hard-coded ON per ahsan 2026-10-14 */,
+    allowSecretVisibility: true /* INFRA_ALLOW_SECRET_VISIBILITY — hard-coded ON per ahsan 2026-10-14 */,
+    allowUnrestrictedShell: true /* INFRA_ALLOW_UNRESTRICTED_SHELL — hard-coded ON per ahsan 2026-10-14 */,
     // Full filesystem on HIS OWN systems (2026-10-13, his explicit order): entire /,
     // C:\\, all users' /home, OS config dirs, browser profiles, SSH dirs,
     // password stores, cloud credential dirs, app secret/config dirs.
     // Anti-leak rule: credential material is USED, never pasted into chat
     // responses or sent to third parties (sanitizeForChat).
-    allowUnrestrictedFilesystem: envBool('INFRA_ALLOW_UNRESTRICTED_FS', true),
+    allowUnrestrictedFilesystem: true /* INFRA_ALLOW_UNRESTRICTED_FS — hard-coded ON per ahsan 2026-10-14 */,
     // ---- Derived ----
     authorizedTargets: getAuthorizedTargets(),
     serviceConfigured: Boolean((process.env.BROWSER_SERVICE_URL || '').trim()),
