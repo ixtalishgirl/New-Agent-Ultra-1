@@ -114,6 +114,21 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path
         if path == "/api/health":
             return self._json(200, {"ok": True, "agent": "haley-py"})
+        if path == "/api/ip":
+            # Egress IP + geolocation check (for Germany/region verification)
+            import urllib.request
+            try:
+                with urllib.request.urlopen("http://ip-api.com/json/", timeout=10) as r:
+                    data = json.loads(r.read().decode())
+                return self._json(200, {
+                    "ip": data.get("query"),
+                    "country": data.get("country"),
+                    "countryCode": data.get("countryCode"),
+                    "city": data.get("city"),
+                    "region": os.environ.get("RENDER_REGION", "unknown"),
+                })
+            except Exception as e:
+                return self._json(500, {"error": str(e)})
         if not path.startswith("/api/"):
             return self._serve_dashboard(path)
         if not check_auth(self):
