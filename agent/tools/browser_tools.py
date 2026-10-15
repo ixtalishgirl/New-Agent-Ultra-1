@@ -29,11 +29,24 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
+
+# Per-thread browser context routing. The main agent uses the default
+# (shared) context; each replicated child agent gets its own isolated
+# Playwright browser context (separate cookies, storage, pages) so parallel
+# children never leak sessions into each other. replicate_tools sets this
+# in the child thread before the child runs.
+_thread_context = threading.local()
+
+
+def _current_browser_context() -> str:
+    return getattr(_thread_context, "ctx", "") or ""
+
 
 BASE_DIR = Path("/tmp/browser_daemon")
 PORT_FILE = BASE_DIR / "cdp.port"
@@ -222,11 +235,63 @@ def main():
     args = json.loads(sys.argv[2])
     op = args["op"]
     out = {}
+    # Isolated browser context per child agent: separate tabs file and a
+    # dedicated Playwright context (own cookies/storage/pages). Empty ctx_id
+    # = the default shared context (main agent behavior, unchanged).
+    ctx_id = str(args.get("browser_context") or "")
+    tabs_file = (BASE / "tabs.json" if not ctx_id
+                 else BASE / ("tabs_ctx_" + "".join(
+                     c if c.isalnum() or c in "-_" else "_"
+                     for c in ctx_id)[:48] + ".json"))
     try:
         from playwright.sync_api import sync_playwright
-        sess = load(BASE / "tabs.json",
+        sess = load(tabs_file,
                     {"seq": 0, "active": None, "tabs": {}})
         tabs = sess.setdefault("tabs", {})
+
+        def _op_log_console(msg):
+            try:
+                with open(BASE / "console.jsonl", "a") as f:
+                    f.write(json.dumps({
+                        "t": time.time(), "type": msg.type,
+                        "text": (msg.text or "")[:2000],
+                        "ctx": ctx_id}) + "\n")
+            except Exception:
+                pass
+
+        def _op_log_request(req):
+            try:
+                with open(BASE / "network.jsonl", "a") as f:
+                    f.write(json.dumps({
+                        "t": time.time(), "method": req.method,
+                        "url": (req.url or "")[:2000],
+                        "resource": req.resource_type,
+                        "ctx": ctx_id}) + "\n")
+            except Exception:
+                pass
+
+        def _pick_context(browser, ctx_id):
+            """Return the isolated context for ctx_id, creating it on demand."""
+            ctxs = list(browser.contexts)
+            if not ctx_id:
+                return ctxs[0] if ctxs else browser.new_context()
+            cmap = load(BASE / "contexts.json", {})
+            for i, c in enumerate(ctxs):
+                if cmap.get(ctx_id) == i:
+                    return c
+            new_ctx = browser.new_context()
+            try:
+                new_ctx.on("console", _op_log_console)
+                new_ctx.on("request", _op_log_request)
+            except Exception:
+                pass
+            ctxs = list(browser.contexts)
+            try:
+                cmap[ctx_id] = ctxs.index(new_ctx)
+            except ValueError:
+                cmap[ctx_id] = len(ctxs) - 1
+            save(BASE / "contexts.json", cmap)
+            return new_ctx
 
         def sync_session(ctx):
             pages = ctx.pages
@@ -269,7 +334,7 @@ def main():
         with sync_playwright() as p:
             browser = p.chromium.connect_over_cdp(
                 f"http://127.0.0.1:{args['port']}")
-            ctx = browser.contexts[0]
+            ctx = _pick_context(browser, ctx_id)
             sync_session(ctx)
 
             if op in ("back", "forward", "refresh"):
@@ -449,7 +514,154 @@ def main():
                                         "height": int(args["height"])})
                 out = {"tab_id": tid, "viewport": [args["width"],
                                                   args["height"]]}
-            save(BASE / "tabs.json", sess)
+            elif op == "inspect_element":
+                tid, page = resolve(ctx, args.get("tab_id"))
+                sel = args.get("selector", "")
+                info = page.evaluate("""(sel) => {
+                  const el = document.querySelector(sel);
+                  if (!el) return {found: false};
+                  const cs = getComputedStyle(el);
+                  const r = el.getBoundingClientRect();
+                  const pick = {};
+                  ["display","visibility","color","backgroundColor",
+                   "fontSize","fontFamily","width","height","position",
+                   "zIndex","opacity","cursor"].forEach(k => pick[k] = cs[k]);
+                  const attrs = {};
+                  for (const a of el.attributes) attrs[a.name] = a.value;
+                  return {found: true, tag: el.tagName.toLowerCase(),
+                    outerHTML: el.outerHTML.slice(0, 20000),
+                    text: (el.innerText || "").slice(0, 2000),
+                    attrs: attrs, computed: pick,
+                    box: {x: r.x, y: r.y, width: r.width, height: r.height}};
+                }""", sel)
+                out = {"tab_id": tid, "selector": sel, **info}
+            elif op == "login":
+                # Full login flow in one op: navigate -> detect/fill fields ->
+                # optional TOTP -> submit -> verify. The password is never
+                # included in `out` (never logged, never persisted).
+                tid, page = resolve(ctx, args.get("tab_id"))
+                url = args.get("url", "")
+                if url and (not page or not page.url.startswith(url[:24])):
+                    page = ctx.new_page()
+                    page.goto(url, timeout=45000,
+                              wait_until="domcontentloaded")
+                    page.wait_for_timeout(1500)
+                    sync_session(ctx)
+                    tid = [t for t, i in tabs.items()
+                           if i["index"] == len(ctx.pages) - 1][0]
+                    sess["active"] = tid
+                username = args.get("username", "")
+                password = args.get("password", "")
+                user_sel = args.get("username_selector") or ""
+                pass_sel = args.get("password_selector") or ""
+                submit_sel = args.get("submit_selector") or ""
+                success_sel = args.get("success_selector") or ""
+                start_url = page.url
+                find_input = """(kind) => {
+                  const sels = kind === "user"
+                    ? ['input[type="email"]','input[name*="user" i]',
+                       'input[name*="email" i]','input[name*="login" i]',
+                       'input[type="text"]','input:not([type])']
+                    : ['input[type="password"]'];
+                  for (const s of sels) {
+                    try { const el = document.querySelector(s);
+                      if (el && el.offsetParent !== null) return s;
+                    } catch (e) {}
+                  }
+                  return null; }"""
+                if not user_sel:
+                    user_sel = page.evaluate(f"({find_input})('user')")
+                if user_sel and username:
+                    page.fill(user_sel, username, timeout=15000)
+                    page.wait_for_timeout(500)
+                if not pass_sel:
+                    pass_sel = page.evaluate(f"({find_input})('pass')")
+                if not pass_sel:
+                    # multi-step login (e.g. Google): advance once, retry
+                    nxt = submit_sel or page.evaluate("""() => {
+                      const cands = ['button[type="submit"]',
+                        'input[type="submit"]', 'button'];
+                      for (const s of cands) {
+                        try { const el = document.querySelector(s);
+                          if (el && el.offsetParent !== null &&
+                              /next|continue|sign in|log in/i.test(
+                                el.innerText || el.value || "")) return s;
+                        } catch (e) {}
+                      }
+                      try { const b = document.querySelector(
+                        'button[type="submit"]');
+                        return (b && b.offsetParent !== null)
+                          ? 'button[type="submit"]' : null;
+                      } catch (e) { return null; } }""")
+                    if nxt:
+                        page.click(nxt, timeout=10000)
+                        page.wait_for_timeout(2000)
+                    pass_sel = page.evaluate(f"({find_input})('pass')")
+                if pass_sel and password:
+                    page.fill(pass_sel, password, timeout=15000)
+                    page.wait_for_timeout(500)
+                totp_secret = (args.get("totp_secret") or "").strip()
+                if totp_secret:
+                    import hmac as _hmac, hashlib as _hl, struct as _st
+                    import base64 as _b64, time as _tm
+                    try:
+                        key = _b64.b32decode(
+                            totp_secret.replace(" ", "").upper())
+                        ctr = int(_tm.time()) // 30
+                        hs = _hmac.new(
+                            key, _st.pack(">Q", ctr), _hl.sha1).digest()
+                        off = hs[-1] & 0x0F
+                        code = str((_st.unpack(
+                            ">I", hs[off:off + 4])[0] & 0x7FFFFFFF)
+                            % 1000000).zfill(6)
+                        tsel = page.evaluate("""() => {
+                          const sels = ['input[name*="totp" i]',
+                            'input[name*="otp" i]','input[name*="code" i]',
+                            'input[inputmode="numeric"]'];
+                          for (const s of sels) {
+                            try { const el = document.querySelector(s);
+                              if (el && el.offsetParent !== null) return s;
+                            } catch (e) {}
+                          }
+                          return null; }""")
+                        if tsel:
+                            page.fill(tsel, code, timeout=10000)
+                            page.wait_for_timeout(500)
+                    except Exception:
+                        pass
+                sub = submit_sel or page.evaluate("""() => {
+                  try { const b = document.querySelector(
+                    'button[type="submit"]');
+                    return (b && b.offsetParent !== null)
+                      ? 'button[type="submit"]' : null;
+                  } catch (e) { return null; } }""")
+                if sub:
+                    page.click(sub, timeout=15000)
+                else:
+                    page.keyboard.press("Enter")
+                page.wait_for_timeout(3000)
+                verified, detail = False, ""
+                if success_sel:
+                    try:
+                        page.wait_for_selector(success_sel, timeout=10000)
+                        verified = True
+                        detail = f"success indicator present: {success_sel}"
+                    except Exception:
+                        detail = ("login not confirmed "
+                                  f"(no {success_sel}); url={page.url}")
+                else:
+                    still_pw = page.evaluate(
+                        "() => !!document.querySelector("
+                        "'input[type=\"password\"]')")
+                    url_changed = page.url != start_url
+                    verified = (not still_pw) or url_changed
+                    detail = (f"url_changed={url_changed} "
+                              f"password_field_gone={not still_pw} "
+                              f"url={page.url}")
+                sync_session(ctx)
+                out = {"tab_id": tid, "url": page.url,
+                       "logged_in": verified, "detail": detail}
+            save(tabs_file, sess)
     except Exception as e:
         out = {"error": str(e)[:800]}
     print(json.dumps(out, default=str))
@@ -483,6 +695,9 @@ def _run_op(op: str, params: dict, timeout: int = 90) -> dict:
 
 def _res(op: str, params: dict, timeout: int = 90) -> BrowserResult:
     try:
+        # Route to this thread's isolated browser context (child agents).
+        params = dict(params)
+        params.setdefault("browser_context", _current_browser_context())
         r = _run_op(op, params, timeout)
         if r.get("error"):
             return BrowserResult(ok=False, error=r["error"])
@@ -578,7 +793,19 @@ def browser_tab_screenshot(args: dict) -> BrowserResult:
             f"/tmp/tabshot_{tab_id or 'active'}_{int(time.time())}.png"
         r = _res("tab_screenshot", {"tab_id": tab_id, "output": out})
         if r.ok:
-            r.output = f"screenshot -> {r.parsed.get('path')}"
+            path = r.parsed.get("path") or out
+            data_uri = ""
+            try:
+                import base64
+                with open(path, "rb") as f:
+                    data_uri = ("data:image/png;base64," +
+                                base64.b64encode(f.read()).decode("ascii"))
+            except Exception:
+                pass
+            r.parsed["data_uri"] = data_uri
+            r.output = f"screenshot -> {path}"
+            if data_uri:
+                r.output += f"\n![screenshot]({data_uri})"
         return r
     except Exception as e:
         return BrowserResult(ok=False, error=str(e)[:600])
@@ -682,6 +909,93 @@ def _tab_url(tab_id: Optional[str]) -> str:
     except Exception:
         pass
     return ""
+
+
+def _scrub_secret(text: str, *secrets: str) -> str:
+    """Redact secret values from any text (outputs, errors)."""
+    for s in secrets:
+        if s:
+            text = text.replace(s, "***")
+    return text
+
+
+def browser_login(args: dict) -> BrowserResult:
+    """Log in to a website like an assistant would: navigate, auto-detect the
+    username/password fields (or use the given selectors), handle multi-step
+    logins (e.g. Google: username -> Next -> password), optional TOTP, submit,
+    and verify via success_selector or URL/field heuristics.
+
+    The password is NEVER logged or persisted: it lives only in the call args
+    in memory and is scrubbed from every output and error. The login session
+    (cookies) persists in the daemon browser for later tool calls.
+
+    Google/Kaggle are best-effort: bot detection (CAPTCHA, device checks) may
+    block automated login; the result reports honestly what happened.
+    """
+    url = str(args.get("url", "")).strip()
+    username = str(args.get("username", ""))
+    password = str(args.get("password", ""))
+    if not url or not username or not password:
+        return BrowserResult(
+            ok=False, error="url, username and password are required")
+    params = {
+        "url": url,
+        "username": username,
+        "password": password,  # in-memory only; never echoed in results
+        "username_selector": args.get("username_selector") or "",
+        "password_selector": args.get("password_selector") or "",
+        "submit_selector": args.get("submit_selector") or "",
+        "success_selector": args.get("success_selector") or "",
+        "totp_secret": args.get("totp_secret") or "",
+        "tab_id": args.get("tab_id"),
+    }
+    r = _res("login", params, timeout=int(args.get("timeout", 120)))
+    # Scrub secrets from everything that leaves this function.
+    r.output = _scrub_secret(r.output, password,
+                             str(args.get("totp_secret") or ""))
+    r.error = _scrub_secret(r.error, password,
+                            str(args.get("totp_secret") or ""))
+    if r.parsed:
+        for k in ("detail",):
+            if isinstance(r.parsed.get(k), str):
+                r.parsed[k] = _scrub_secret(r.parsed[k], password)
+    if r.ok:
+        logged_in = bool(r.parsed.get("logged_in"))
+        detail = r.parsed.get("detail", "")
+        r.output = (f"login {'VERIFIED' if logged_in else 'NOT confirmed'}: "
+                    f"{detail}")
+        if not logged_in:
+            r.output += ("\nNote: Google/Kaggle may block bots (CAPTCHA / "
+                         "device verification). Try success_selector or "
+                         "manual approval.")
+    return r
+
+
+def browser_inspect_element(args: dict) -> BrowserResult:
+    """Inspect a DOM element: outer HTML, attributes, computed styles,
+    text, and bounding box. Complements browser_tab_html (full DOM),
+    browser_console (logs) and browser_network (requests)."""
+    sel = str(args.get("selector", "")).strip()
+    if not sel:
+        return BrowserResult(ok=False, error="selector is required")
+    r = _res("inspect_element", {"selector": sel,
+                                 "tab_id": args.get("tab_id")})
+    if r.ok:
+        if not r.parsed.get("found"):
+            r.ok = False
+            r.error = f"no element matches: {sel}"
+            r.output = r.error
+        else:
+            info = r.parsed
+            r.output = (
+                f"<{info.get('tag')}> {sel}\n"
+                f"box={info.get('box')}\n"
+                f"text: {(info.get('text') or '')[:300]}\n"
+                f"attrs: {json.dumps(info.get('attrs', {}))[:500]}\n"
+                f"computed: {json.dumps(info.get('computed', {}))[:500]}\n"
+                f"html[{len(info.get('outerHTML', ''))} chars] "
+                f"(full HTML in parsed.outerHTML)")
+    return r
 
 
 def browser_console(args: dict) -> BrowserResult:
@@ -1008,6 +1322,20 @@ TOOL_DEFS: list[tuple] = [
     ("browser_network", "Read captured network requests (daemon log)",
      {**_TAB, "tail": _S("integer", False, "Last N requests (default 100)")},
      "computer", 60),
+    ("browser_login", "Log in to a website like an assistant: auto-detect fields, multi-step + TOTP support, verifies login. Google/Kaggle best-effort (bot detection may block). Password never logged/persisted.",
+     {"url": _S("string", True, "Login page URL"),
+      "username": _S("string", True, "Username / email"),
+      "password": _S("string", True, "Password (in-memory only, never logged)"),
+      "username_selector": _S("string", False, "CSS selector override"),
+      "password_selector": _S("string", False, "CSS selector override"),
+      "submit_selector": _S("string", False, "CSS selector override"),
+      "success_selector": _S("string", False, "Selector proving login worked"),
+      "totp_secret": _S("string", False, "Base32 TOTP secret (optional)"),
+      "tab_id": _S("string", False, "Tab id (default: active tab)")},
+     "computer", 180),
+    ("browser_inspect_element", "Inspect a DOM element: outer HTML, attributes, computed styles, text, bounding box",
+     {**_TAB, "selector": _S("string", True, "CSS selector")},
+     "computer", 60),
     ("browser_download", "Download a URL to a file (refuses overwrite without confirm)",
      {"url": _S("string", True, "File URL"),
       "dest": _S("string", False, "Destination path"),
@@ -1073,6 +1401,8 @@ HANDLERS: dict[str, Any] = {
     "browser_wait": browser_wait,
     "browser_console": browser_console,
     "browser_network": browser_network,
+    "browser_login": browser_login,
+    "browser_inspect_element": browser_inspect_element,
     "browser_download": browser_download,
     "browser_upload": browser_upload,
     "browser_js": browser_js,

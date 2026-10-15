@@ -1,4 +1,5 @@
-# Haley agent — stdlib only. No third-party runtime dependencies.
+# Haley agent — runtime dependencies (installed on Render via render.yaml).
+playwright>=1.48.0      # real Chromium automation (browser tools, screenshots)
+psycopg2-binary>=2.9.0  # direct Postgres for supabase_query (CREATE TABLE etc.)
 # Optional (install only if needed for full powers):
-# playwright      # real Chromium automation (browser tools)
 # requests        # used only if stdlib urllib is insufficient

@@ -230,7 +230,7 @@ def screen_shot(args: dict) -> VisionResult:
         return VisionResult(
             ok=True,
             output=f"captured {size} bytes via {backend} ({note}) -> {path}\n"
-                   f"data_uri[{len(uri)} chars]: {uri[:120]}...",
+                   f"![screenshot]({uri})",
             parsed={"path": path, "backend": backend, "bytes": size,
                     "data_uri": uri})
     except Exception as e:

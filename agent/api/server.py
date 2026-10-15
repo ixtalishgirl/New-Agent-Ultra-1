@@ -207,6 +207,17 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._json(500, {"success": False, "error": str(e)[:500]})
 
+        if path == "/api/selfmod/demo":
+            # Live demo: one safe self-mod (dashboard accent color rotation),
+            # verified before/after. Visible proof the agent modifies itself.
+            audit.record("selfmod_demo", details={})
+            try:
+                from agent.tools.selfmod_tools import selfmod_demo
+                res = selfmod_demo()
+                return self._json(200, {"success": bool(res.get("ok")), **res})
+            except Exception as e:
+                return self._json(500, {"success": False, "error": str(e)[:500]})
+
         if path == "/api/tools/execute":
             name = body.get("name", "")
             args = body.get("args", {})

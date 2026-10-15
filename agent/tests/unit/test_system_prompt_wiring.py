@@ -1,8 +1,8 @@
-"""Tests wiring 480 permissions + 318 tools into the agent runtime.
+"""Tests wiring permissions + tools into the agent runtime (counts dynamic).
 
 - System prompt pulls LIVE tools/permissions (no stale hardcoded list).
 - /api/chat serializes AgentResult via to_dict() (no TypeError).
-- /api/permissions returns all 480 entries from the Permission Manager.
+- /api/permissions returns all entries from the Permission Manager.
 """
 import json
 
@@ -26,13 +26,16 @@ def prompt():
 
 def test_prompt_contains_all_tool_names(prompt):
     names = [t["name"] for t in build_full_registry().discover()]
-    assert len(names) == 318, f"expected 318 tools, got {len(names)}"
+    assert len(names) > 300, f"registry unexpectedly small: {len(names)}"
     missing = [n for n in names if n not in prompt]
     assert not missing, f"tools missing from prompt: {missing[:5]}"
 
 
 def test_prompt_lists_enabled_permissions(prompt):
-    assert "all 475 permissions ON" in prompt
+    pm = build_manager(build_full_registry())
+    enabled, total = pm.count_enabled()
+    assert f"all {enabled} permissions ON" in prompt
+    assert enabled == total - 5  # only the 5 locked denials are off
 
 
 def test_prompt_contains_denials_as_denials(prompt):
@@ -86,6 +89,8 @@ def test_chat_serializes_agent_result():
 
 def test_permissions_endpoint_returns_480():
     from agent.api import server  # noqa: F401
+    pm = build_manager(build_full_registry())
+    enabled, total = pm.count_enabled()
     h = _make_handler()
     h.path = "/api/permissions"
     h.headers = {}
@@ -93,10 +98,10 @@ def test_permissions_endpoint_returns_480():
     assert len(h.captured) == 1
     code, obj = h.captured[0]
     assert code == 200
-    assert obj["total"] == 480
-    assert obj["enabled"] == 475
-    assert obj["locked"] == 5
-    assert len(obj["permissions"]) == 480
+    assert obj["total"] == total
+    assert obj["enabled"] == enabled
+    assert obj["locked"] == total - enabled
+    assert len(obj["permissions"]) == total
     by_name = {p["name"]: p for p in obj["permissions"]}
     for k in DENIAL_KEYS:
         assert by_name[k]["enabled"] is False

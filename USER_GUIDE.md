@@ -513,6 +513,21 @@ text = runner.get_text(page)
 runner.screenshot(page, "output.png")
 ```
 
+### Playwright on Render
+
+The 25 browser tools need the Playwright engine. On Render it is installed
+automatically at build time (`render.yaml` buildCommand runs
+`python -m playwright install --only-shell chromium`, falling back to full
+chromium — the build never fails if the download is unavailable).
+If the engine is missing, every browser tool returns an honest
+"playwright not installed" message instead of fake results.
+
+### Screenshots reach you in chat
+
+`browser_tab_screenshot` and `screen_shot` return the PNG as a base64 data
+URI. The dashboard chat renders it inline as an image — ask the agent
+"take a screenshot of example.com" and you will SEE it in the chat.
+
 ### Germany routing
 
 ```python
@@ -520,6 +535,23 @@ import os
 os.environ["GERMANY_PROXY_URL"] = "http://proxy:8080"
 # Browser automatically routes through Germany
 ```
+
+---
+
+## 9b. Supabase (your database)
+
+The agent has full read/write SQL access via `supabase_query` — including
+`CREATE TABLE`, `INSERT`, `UPDATE`, `DELETE`. Set on Render:
+
+- `SUPABASE_DB_URL` — direct Postgres URL (preferred, full SQL)
+- or `SUPABASE_URL` + `SUPABASE_KEY` — REST fallback (SELECT only)
+
+```json
+{ "name": "supabase_query",
+  "args": { "sql": "CREATE TABLE IF NOT EXISTS notes (id SERIAL PRIMARY KEY, text TEXT);" } }
+```
+
+Credential values are never written to logs or error output.
 
 ---
 
@@ -550,6 +582,65 @@ improvements = planner.plan_improvements(observations)
 - Full test suite must pass
 - Benchmarks compared to baseline
 - Rollback always available
+
+### Tool creation — real tools, not code dumps
+
+You never touch code. You ask ("make me a tool that converts CSV to JSON"),
+and the agent builds a REAL tool it uses itself — exactly like an assistant
+uses its tools:
+
+1. `tool_create` receives `name`, `description`, `input_schema`, and `code`
+   (the code must define `run(args: dict) -> dict`).
+2. The tool is written to `agent/tools/custom/<name>.py` and listed in
+   `agent/tools/custom/manifest.json`.
+3. It is registered in the central ToolRegistry **immediately** — callable in
+   the same session via the normal `Dispatcher.dispatch` path, permission-
+   gated like every built-in tool (ON by default; the 5 locked denials are
+   still enforced on generated code).
+4. The code is backed up to the Supabase `custom_tools` table, because
+   Render's disk is ephemeral. On startup, if the local `custom/` dir is
+   empty, tools are restored from Supabase automatically.
+
+Ask in chat: "create a tool called csv2json that ..." — then immediately use
+it: the agent calls it itself the same way it calls any other tool.
+
+---
+
+## 10b. Self-replication (teams of agents)
+
+The agent spawns child agents that work in parallel — one AI does one task,
+another does another:
+
+- `spawn_agent` — start a child (own session_id) on a task → child_id
+- `agent_status` / `agent_result` / `agent_stop` — monitor and collect
+- `fan_out` — run N tasks across N children, combine results
+- `replicate_verify` — spawns 2 test children, each runs a real tool;
+  reports PASS/FAIL per child (the "is it really working" proof)
+
+Bounds: max 8 active children per parent, max depth 3, 10-minute default
+timeout. Children inherit the full permission gate including the 5 locked
+denials. **Each child gets its own isolated Playwright browser context**
+(separate cookies/storage/pages) — parallel children never leak sessions
+into each other or the parent.
+
+---
+
+## 10c. Website login + self-modification
+
+- `browser_login` — log in to Google, Kaggle, or any login form like an
+  assistant: auto-detects fields, handles multi-step flows and TOTP,
+  verifies the login. The password lives only in call args in memory and
+  is scrubbed from every output/error. Google is best-effort (bot detection
+  may block).
+- `browser_inspect_element` — outer HTML, attributes, computed styles,
+  bounding box for any CSS selector (complements DOM snapshot, console,
+  network inspection).
+- `self_modify` — the agent REALLY edits its own code: git branch → apply
+  patch → run tests → report (automatic rollback on failure).
+  `agent/tools/permission_gate.py` is refused (it guards the 5 denials).
+- `scheduled_selfmod` — safe scheduled demo: rotates the dashboard accent
+  color, verifies, logs. Run `POST /api/selfmod/demo` to trigger it live
+  and see the before/after.
 
 ---
 

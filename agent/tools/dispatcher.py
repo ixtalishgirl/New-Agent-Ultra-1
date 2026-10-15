@@ -559,32 +559,70 @@ class Dispatcher:
             return DispatchResult(ok=False, output=f"Browser error: {e}")
 
     def _tool_create(self, args: dict) -> DispatchResult:
-        """Create and register a new tool from Python code via ToolFactory."""
-        from pathlib import Path
-        from .factory import ToolFactory
+        """Create a REAL tool the agent itself uses — like an assistant's tools.
+
+        Writes agent/tools/custom/<name>.py, registers it in the central
+        ToolRegistry IMMEDIATELY (usable in this same session via
+        Dispatcher.dispatch), appends to custom/manifest.json, and backs the
+        code up to Supabase `custom_tools` (Render disk is ephemeral).
+
+        Contract for `code`: must define run(args: dict) -> dict.
+        The 5 hard denials are enforced on the code by permission_gate
+        (checked in dispatch() before this runs).
+        """
+        from . import custom_tools as ct
         name = str(args.get("name", "")).strip()
         code = str(args.get("code", ""))
         description = str(args.get("description", "") or f"Generated tool: {name}")
+        schema = args.get("input_schema") or args.get("schema") or {"type": "object"}
+        if not isinstance(schema, dict):
+            return DispatchResult(ok=False, output="input_schema must be an object")
         if not name or not code:
             return DispatchResult(ok=False, output="tool_create needs 'name' and 'code'")
         try:
-            factory = ToolFactory(generated_dir=Path(self.workspace) / "agent" / "tools" / "generated")
-            tool = factory.generate(
-                name=name,
-                description=description,
-                input_schema=args.get("input_schema") or {"type": "object"},
-                code=code,
-                language=str(args.get("language", "python")),
-            )
-            return DispatchResult(
-                ok=True,
-                output=json.dumps({
-                    "name": tool.name, "version": tool.version,
-                    "description": tool.description, "status": tool.status,
-                    "note": "saved to generated/ — restart or hot-load to activate",
-                }, indent=1))
+            safe, path = ct.save_custom_tool(name, description, schema, code)
+        except ValueError as e:
+            return DispatchResult(ok=False, output=f"tool_create rejected: {e}")
         except Exception as e:
             return DispatchResult(ok=False, output=f"tool_create failed: {e}")
+        # Immediate activation in this session: registry + handlers + perms.
+        try:
+            mod = ct.load_custom_module(safe)
+            from .registry import ToolDef
+            for item in getattr(mod, "TOOL_DEFS", []) or []:
+                tname, desc, tschema = item[0], item[1], item[2]
+                profile = item[3] if len(item) > 3 else "custom"
+                timeout = item[4] if len(item) > 4 else 60
+                if self.registry.get(tname) is None:
+                    self.registry.register(ToolDef(
+                        name=tname, version="1.0.0", description=desc,
+                        input_schema=tschema, permission_profile=profile,
+                        timeout=timeout))
+            handlers = self.cc_handlers  # ensure lazy cache exists
+            mh = getattr(mod, "HANDLERS", None)
+            if isinstance(mh, dict):
+                handlers.update(mh)
+            try:
+                self.permission_manager.refresh_tools(self.registry)
+            except Exception:
+                pass
+        except Exception as e:
+            return DispatchResult(
+                ok=False,
+                output=f"tool_create saved to {path} but activation failed: {e}")
+        bak_ok, bak_note = ct.backup_to_supabase(safe, code, schema, description)
+        return DispatchResult(
+            ok=True,
+            output=json.dumps({
+                "name": safe,
+                "version": "1.0.0",
+                "description": description,
+                "path": str(path),
+                "active": True,
+                "supabase_backup": bak_ok,
+                "note": ("registered and callable immediately via "
+                         "Dispatcher.dispatch; ") + bak_note,
+            }, indent=1))
 
     def _germany_fetch(self, url: str) -> DispatchResult:
         import os, urllib.request

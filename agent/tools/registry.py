@@ -89,6 +89,9 @@ _COMPUTER_CONTROL_MODULES = [
     "agent.tools.sys2_tools",      # Advanced System Capabilities
     "agent.tools.risk_tools",      # High-Risk (default ON, audit-logged)
     "agent.tools.self_tools",      # Self-Improvement & Tool Creation
+    "agent.tools.supabase_tools",  # Supabase / Postgres executor
+    "agent.tools.replicate_tools",  # Self-replication (child agents)
+    "agent.tools.selfmod_tools",  # Self-modification (verified)
 ]
 
 
@@ -129,6 +132,14 @@ def build_full_registry() -> ToolRegistry:
     reg = default_registry()
     for mod_name in _COMPUTER_CONTROL_MODULES:
         _register_module_tools(reg, mod_name)
+    # Runtime-created tools (tool_create): restore from Supabase when the
+    # local custom/ dir is empty (Render disk is ephemeral), then register.
+    try:
+        from agent.tools import custom_tools as _ct
+        _ct.ensure_restored()
+        _ct.register_all(reg)
+    except Exception:
+        pass
     return reg
 
 
@@ -148,6 +159,13 @@ def collect_handlers() -> dict:
         if isinstance(mod_handlers, dict):
             for name, fn in mod_handlers.items():
                 handlers.setdefault(name, fn)
+    # Runtime-created tools (agent/tools/custom/) — kept usable like builtins.
+    try:
+        from agent.tools import custom_tools as _ct
+        for name, fn in _ct.collect_custom_handlers().items():
+            handlers.setdefault(name, fn)
+    except Exception:
+        pass
     return handlers
 
 
