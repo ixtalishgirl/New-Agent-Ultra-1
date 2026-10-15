@@ -23,15 +23,49 @@ class DispatchResult:
 
 
 class Dispatcher:
-    def __init__(self, registry: ToolRegistry, workspace: str):
+    def __init__(self, registry: ToolRegistry, workspace: str,
+                 permission_manager=None):
         self.registry = registry
         self.workspace = workspace
+        # Central permission authority. When absent, a default manager is
+        # built from the registry (all ON except the 5 locked denials).
+        if permission_manager is None:
+            from .permission_manager import PermissionManager
+            permission_manager = PermissionManager(registry=registry)
+        self.permission_manager = permission_manager
         self._git: GitTools | None = None
         self._git_failed = False
         self._files: FileTools | None = None
         self._net: NetworkTools | None = None
         self._data: DataTools | None = None
         self._sys: SystemTools | None = None
+        self._cc_handlers: dict | None = None
+
+    @property
+    def cc_handlers(self) -> dict:
+        """Lazily merged HANDLERS from computer-control tool modules.
+
+        Modules that expose a module-level ``set_executor(fn)`` (e.g.
+        memory_tools for workflow_run/branch_if/parallel_run) get this
+        dispatcher's own ``dispatch`` bound, so nested tool calls flow
+        through the same permission checks.
+        """
+        if self._cc_handlers is None:
+            import importlib
+            from .registry import collect_handlers, _COMPUTER_CONTROL_MODULES
+            self._cc_handlers = collect_handlers()
+            for mod_name in _COMPUTER_CONTROL_MODULES:
+                try:
+                    mod = importlib.import_module(mod_name)
+                except Exception:
+                    continue
+                binder = getattr(mod, "set_executor", None)
+                if callable(binder):
+                    try:
+                        binder(self.dispatch)
+                    except Exception:
+                        pass
+        return self._cc_handlers
 
     # -- lazy tool-module accessors --------------------------------------
     @property
@@ -180,9 +214,15 @@ class Dispatcher:
         if tool is None:
             return DispatchResult(ok=False,
                                   output=f"Unknown or disabled tool: {name}")
-        gate = check_tool_call(name, args)
-        if not gate.allowed:
-            return DispatchResult(ok=False, output=gate.reason)
+        # Central permission check: 5 hard denials (absolute) -> permission
+        # toggle state -> destructive-confirmation toggle.
+        check = self.permission_manager.check(name, args or {})
+        if not check.allowed:
+            if check.needs_confirmation:
+                return DispatchResult(
+                    ok=False,
+                    output=f"CONFIRMATION_REQUIRED: {check.reason}")
+            return DispatchResult(ok=False, output=check.reason)
         try:
             return self._execute(name, args, tool.timeout)
         except Exception as e:
@@ -208,6 +248,14 @@ class Dispatcher:
             return self._web_search(str(args.get("query", "")))
         elif name == "germany_fetch":
             return self._germany_fetch(str(args.get("url", "")))
+        elif name == "browser_navigate":
+            return self._browser("navigate", args)
+        elif name == "browser_screenshot":
+            return self._browser("screenshot", args)
+        elif name == "browser_extract":
+            return self._browser("extract", args)
+        elif name == "tool_create":
+            return self._tool_create(args)
         # ---- git tools ----
         elif name == "git_status":
             return self._wrap(self.git.status(path=args.get("path") or None))
@@ -295,10 +343,39 @@ class Dispatcher:
                       "text_diff"):
             return self._text(name, args)
         else:
+            return self._computer_control(name, args)
+
+    def _computer_control(self, name: str, args: dict) -> DispatchResult:
+        """Generic dispatch for computer-control tool modules.
+
+        Each module exposes HANDLERS[name](args) -> result with
+        .ok/.output/.parsed/.error. Merged lazily via registry.collect_handlers().
+        """
+        import json as _json
+        fn = self.cc_handlers.get(name)
+        if fn is None:
             return DispatchResult(
                 ok=False,
                 output=f"Tool '{name}' registered but executor not yet wired "
-                       f"(browser/supabase/self_modify/tool_create land in later phases).")
+                       f"(browser/supabase/self_modify land in later phases).")
+        try:
+            result = fn(args or {})
+            ok = bool(getattr(result, "ok", False))
+            output = str(getattr(result, "output", "") or "")
+            parsed = getattr(result, "parsed", None)
+            if parsed:
+                try:
+                    output += "\n[parsed]\n" + _json.dumps(
+                        parsed, indent=2, default=str)[:8000]
+                except Exception:
+                    pass
+            err = getattr(result, "error", "")
+            if not ok and err and err not in output:
+                output += f"\nError: {err}"
+            return DispatchResult(ok=ok, output=output)
+        except Exception as e:
+            return DispatchResult(
+                ok=False, output=f"Computer-control tool error: {e}")
         out = f"exit={r.exit_code} duration_ms={r.duration_ms}\nSTDOUT:\n{r.stdout}\nSTDERR:\n{r.stderr}"
         return DispatchResult(ok=r.ok, output=out)
 
@@ -403,6 +480,104 @@ class Dispatcher:
                                   output="\n".join(f"- {t}" for t in clean if t))
         except Exception as e:
             return DispatchResult(ok=False, output=f"Search failed: {e}")
+
+    def _browser(self, action: str, args: dict) -> DispatchResult:
+        """Real Chromium automation via PlaywrightRunner (subprocess-isolated).
+
+        browser_navigate {url} -> title/url/text snippet
+        browser_screenshot {url} -> base64 PNG (data URI) for live viewing
+        browser_extract {url} -> page text content
+        Fails gracefully when playwright/chromium is not installed.
+        """
+        try:
+            from ..browser.playwright_runner import PlaywrightRunner
+        except Exception as e:
+            return DispatchResult(ok=False, output=f"Browser unavailable: {e}")
+        url = str(args.get("url", ""))
+        if not url:
+            return DispatchResult(ok=False, output="browser tool needs 'url'")
+        if not url.startswith(("http://", "https://")):
+            url = "https://" + url
+        try:
+            runner = PlaywrightRunner(timeout=int(args.get("timeout", 60)))
+            if action == "navigate":
+                res = runner.navigate(url)
+                err = res.get("error", "")
+                if err:
+                    if "ModuleNotFoundError" in err or "No module named 'playwright'" in err:
+                        return DispatchResult(ok=False, output="Playwright not installed on this host — browser automation unavailable here.")
+                    return DispatchResult(ok=False, output=err[:300])
+                return DispatchResult(
+                    ok=True,
+                    output=json.dumps({
+                        "title": res.get("title", ""),
+                        "url": res.get("url", url),
+                        "text": (res.get("text", "") or "")[:4000],
+                    }, indent=1))
+            if action == "extract":
+                res = runner.navigate(url)
+                err = res.get("error", "")
+                if err:
+                    if "ModuleNotFoundError" in err or "No module named 'playwright'" in err:
+                        return DispatchResult(ok=False, output="Playwright not installed on this host — browser automation unavailable here.")
+                    return DispatchResult(ok=False, output=err[:300])
+                return DispatchResult(ok=True, output=(res.get("text", "") or "")[:12000])
+            # screenshot -> base64 data URI so the dashboard can <img> it live
+            import base64, os, tempfile
+            tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+            tmp.close()
+            try:
+                res = runner.screenshot(url, path=tmp.name)
+                err = res.get("error", "")
+                if err:
+                    if "ModuleNotFoundError" in err or "playwright" in err.lower():
+                        return DispatchResult(ok=False, output="Playwright not installed on this host — browser automation unavailable here.")
+                    return DispatchResult(ok=False, output=err[:300])
+                if not os.path.exists(tmp.name):
+                    return DispatchResult(ok=False, output="screenshot failed (no file)")
+                with open(tmp.name, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode()
+                return DispatchResult(
+                    ok=True,
+                    output=json.dumps({
+                        "data_uri": "data:image/png;base64," + b64,
+                        "url": url,
+                    }))
+            finally:
+                try:
+                    os.unlink(tmp.name)
+                except OSError:
+                    pass
+        except Exception as e:
+            return DispatchResult(ok=False, output=f"Browser error: {e}")
+
+    def _tool_create(self, args: dict) -> DispatchResult:
+        """Create and register a new tool from Python code via ToolFactory."""
+        from pathlib import Path
+        from .factory import ToolFactory
+        name = str(args.get("name", "")).strip()
+        code = str(args.get("code", ""))
+        description = str(args.get("description", "") or f"Generated tool: {name}")
+        if not name or not code:
+            return DispatchResult(ok=False, output="tool_create needs 'name' and 'code'")
+        try:
+            factory = ToolFactory(generated_dir=Path(self.workspace) / "agent" / "tools" / "generated")
+            tool = factory.generate(
+                name=name,
+                description=description,
+                input_schema=args.get("input_schema") or {"type": "object"},
+                code=code,
+                language=str(args.get("language", "python")),
+            )
+            return DispatchResult(
+                ok=True,
+                output=json.dumps({
+                    "name": tool.name, "version": tool.version,
+                    "description": tool.description, "status": tool.status,
+                    "note": "saved to generated/ — restart or hot-load to activate",
+                }, indent=1))
+        except Exception as e:
+            return DispatchResult(ok=False, output=f"tool_create failed: {e}")
 
     def _germany_fetch(self, url: str) -> DispatchResult:
         import os, urllib.request

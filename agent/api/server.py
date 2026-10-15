@@ -21,7 +21,7 @@ import sys
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent.parent.parent))
 
 from agent.app.orchestrator import Orchestrator
-from agent.tools.registry import default_registry
+from agent.tools.registry import build_full_registry as default_registry
 from agent.tools.dispatcher import Dispatcher
 from agent.security.audit_log import AuditLog
 
@@ -144,6 +144,40 @@ class Handler(BaseHTTPRequestHandler):
                 "tunnel": "external",
                 "note": "ngrok tunnel managed externally (Kaggle GPU side)",
             })
+        if path == "/api/permissions":
+            from ..security import ALL_GRANTED, DENIAL_DESCRIPTIONS
+            granted = [
+                {"id": i, "category": cat, "text": text}
+                for (i, cat, text) in ALL_GRANTED
+            ]
+            denials = [
+                {"id": k, "description": v}
+                for k, v in DENIAL_DESCRIPTIONS.items()
+            ]
+            return self._json(200, {
+                "granted_count": len(granted),
+                "denied_count": len(denials),
+                "granted": granted,
+                "denials": denials,
+            })
+        if path == "/api/browser/shot":
+            qs = urllib.parse.urlparse(self.path).query
+            params = urllib.parse.parse_qs(qs)
+            url = (params.get("url", [""])[0] or "").strip()
+            if not url:
+                return self._json(400, {"error": "url required"})
+            try:
+                disp = Dispatcher(default_registry(), workspace=os.getcwd())
+                res = disp.dispatch("browser_screenshot", {"url": url})
+                if not res.ok:
+                    return self._json(502, {"error": res.output[:300]})
+                try:
+                    payload = json.loads(res.output)
+                except Exception:
+                    return self._json(502, {"error": "bad screenshot payload"})
+                return self._json(200, payload)
+            except Exception as e:
+                return self._json(500, {"error": str(e)[:300]})
         return self._json(404, {"error": "not found"})
 
     def do_POST(self):
@@ -170,9 +204,13 @@ class Handler(BaseHTTPRequestHandler):
             args = body.get("args", {})
             audit.record("tool_execute", details={"tool": name})
             try:
-                disp = Dispatcher()
-                result = disp.execute(name, args)
-                return self._json(200, {"success": True, "result": result})
+                disp = Dispatcher(default_registry(), workspace=os.getcwd())
+                res = disp.dispatch(name, args)
+                return self._json(200, {
+                    "success": res.ok,
+                    "result": res.output,
+                    **({} if res.ok else {"error": res.output[:500]}),
+                })
             except Exception as e:
                 return self._json(500, {"success": False, "error": str(e)[:500]})
 

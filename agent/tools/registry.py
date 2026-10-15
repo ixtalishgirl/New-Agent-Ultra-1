@@ -32,6 +32,113 @@ class ToolRegistry:
         if name in self._tools:
             self._tools[name].status = "DISABLED"
 
+    def enable(self, name: str) -> None:
+        if name in self._tools:
+            self._tools[name].status = "APPROVED"
+
+    def discover(self, permission_manager=None) -> list[dict]:
+        """Central discovery point: every registered tool with its schema,
+        description and live enabled state.
+
+        Returns [{name, description, schema, enabled, permission_profile,
+        version, status}]. When a permission_manager is supplied, `enabled`
+        reflects its live toggle state; otherwise it reflects registry status.
+        """
+        out = []
+        for t in self._tools.values():
+            enabled = t.status == "APPROVED"
+            if permission_manager is not None:
+                try:
+                    enabled = enabled and permission_manager.is_allowed(
+                        f"tool:{t.name}")
+                except Exception:
+                    pass
+            out.append({
+                "name": t.name,
+                "description": t.description,
+                "schema": t.input_schema,
+                "enabled": enabled,
+                "permission_profile": t.permission_profile,
+                "version": t.version,
+                "status": t.status,
+            })
+        return sorted(out, key=lambda d: d["name"])
+
+
+# ---------------------------------------------------------------------------
+# Computer-control tool modules (each exposes TOOL_DEFS + HANDLERS).
+# Imported lazily so the registry never breaks when a module is absent.
+# ---------------------------------------------------------------------------
+_COMPUTER_CONTROL_MODULES = [
+    "agent.tools.vision_tools",    # Screen & Vision (10)
+    "agent.tools.input_tools",     # Mouse (9) + Keyboard (12)
+    "agent.tools.browser_tools",   # Live Browser Control
+    "agent.tools.filemgmt_tools",  # File Management extensions
+    "agent.tools.app_tools",       # Application Control
+    "agent.tools.code_tools",      # Coding & Tool Creation extensions
+    "agent.tools.memory_tools",    # Memory & Automation
+    "agent.tools.safety_tools",    # Access & Safety Controls
+]
+
+
+def _register_module_tools(reg: ToolRegistry, module_name: str) -> int:
+    """Register a computer-control module's TOOL_DEFS. Returns count added."""
+    import importlib
+    try:
+        mod = importlib.import_module(module_name)
+    except Exception:
+        return 0
+    defs = getattr(mod, "TOOL_DEFS", None)
+    if not defs:
+        return 0
+    added = 0
+    for item in defs:
+        try:
+            name, desc, schema = item[0], item[1], item[2]
+            profile = item[3] if len(item) > 3 else "computer"
+            timeout = item[4] if len(item) > 4 else 60
+        except Exception:
+            continue
+        if name in reg._tools:
+            continue  # never shadow an existing registration
+        reg.register(ToolDef(name=name, version="1.0.0", description=desc,
+                             input_schema=schema,
+                             permission_profile=profile, timeout=timeout))
+        added += 1
+    return added
+
+
+def build_full_registry() -> ToolRegistry:
+    """Default registry + all computer-control tool modules.
+
+    This is the central discovery registry the agent uses to find, call and
+    use its tools. Every tool here is permission-gated by PermissionManager
+    (all ON except the 5 locked denials) before the Dispatcher executes it.
+    """
+    reg = default_registry()
+    for mod_name in _COMPUTER_CONTROL_MODULES:
+        _register_module_tools(reg, mod_name)
+    return reg
+
+
+def collect_handlers() -> dict:
+    """Merge HANDLERS from all computer-control modules.
+
+    Each handler: fn(args: dict) -> result with .ok/.output/.parsed/.error
+    """
+    import importlib
+    handlers: dict = {}
+    for mod_name in _COMPUTER_CONTROL_MODULES:
+        try:
+            mod = importlib.import_module(mod_name)
+        except Exception:
+            continue
+        mod_handlers = getattr(mod, "HANDLERS", None)
+        if isinstance(mod_handlers, dict):
+            for name, fn in mod_handlers.items():
+                handlers.setdefault(name, fn)
+    return handlers
+
 
 def default_registry() -> ToolRegistry:
     reg = ToolRegistry()

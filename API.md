@@ -104,7 +104,9 @@ curl -X POST http://localhost:8000/api/chat \
 
 ### `GET /api/tools`
 
-List all registered tools.
+List all registered tools (central Tool Registry — includes all computer-control
+tools: screen/vision, mouse, keyboard, live browser, file management, app
+control, coding/tool-creation, memory/automation, access & safety).
 
 **Authentication:** Required
 
@@ -371,6 +373,35 @@ All errors follow this format:
 - **Limit:** 200 requests per minute per token (configurable)
 - **Headers:** `X-RateLimit-Remaining`, `X-RateLimit-Reset`
 - **Exceeded:** Returns `429` with `Retry-After` header
+
+---
+
+## 10. Permissions
+
+### `GET /api/permissions`
+
+Returns the permission policy: granted items (155 policy grants from
+`agent/security/policy.py`) and the 5 locked denials. Runtime toggle state is
+managed by `agent/tools/permission_manager.py` — every permission defaults ON
+except the 5 denials (`container_escape`, `boot_recovery`, `av_edr_disable`,
+`billing_fraud`, `exfiltration`), which are locked OFF at the execution layer
+and can never be self-granted.
+
+**Response:**
+```json
+{
+  "granted_count": 155,
+  "denied_count": 5,
+  "granted": [{"id": 1, "category": "Granted", "text": "..."}],
+  "denials": [{"id": "container_escape", "description": "..."}]
+}
+```
+
+Tool execution (`POST /api/tools/execute`) checks permissions before running:
+denials are absolute, disabled permissions are rejected, and destructive tools
+(`file_delete`, `app_close`, `app_uninstall`, `process_kill`, `memory_delete`,
+`service_control` stop/restart) return `CONFIRMATION_REQUIRED` unless
+`confirm=true` is passed while the destructive-confirmation toggle is ON.
 
 ---
 

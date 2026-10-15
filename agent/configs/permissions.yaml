@@ -1,12 +1,21 @@
 # Permission policy summary.
-# Full source of truth: security/policy.py (all 167 items from PERMISSIONS.md).
-# The 5 denials below are HARD-CODED at the execution layer and can NEVER be
-# self-granted. Beyond these 5, NO other restrictions exist (ahsan's order).
+# Full source of truth: agent/security/policy.py (155 granted policy items)
+# and agent/configs/COMPUTER_CONTROL_PERMISSIONS.md (128 computer-control items,
+# each backed by a real tool in agent/tools/).
+# Runtime authority: agent/tools/permission_manager.py (PermissionManager).
+# Toggle state persists in agent/configs/permission_state.json.
+#
+# The 5 denials below are HARD-CODED at the execution layer
+# (agent/tools/permission_gate.py) and can NEVER be self-granted.
+# Beyond these 5, NO other restrictions exist (ahsan's standing order):
+# every other permission defaults ON.
 denials:
   - container_escape   # host shell from inside container / sandbox escape
   - boot_recovery      # boot/recovery configuration modification
   - av_edr_disable     # antivirus/EDR disabling
   - billing_fraud      # third-party billing/subscription fraud
   - exfiltration       # unauthorized data exfiltration
-granted_count: 155     # + 12 denial restatements = 167 total items
-source: "security/policy.py"
+granted_policy_items: 155   # + 12 denial restatements = 167 PERMISSIONS.md items
+granted_computer_control: 128  # COMPUTER_CONTROL_PERMISSIONS.md, 9 categories
+source: "agent/security/policy.py + agent/tools/permission_manager.py"
+destructive_confirmation_default: true  # toggle safety:destructive_confirmation (ahsan 2026-10-15)

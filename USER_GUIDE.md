@@ -328,6 +328,64 @@ def run(path):
 ''')
 ```
 
+### Permission Manager & central discovery (2026-10-15)
+
+Every tool is registered in the **central Tool Registry**
+(`agent/tools/registry.py`) and gated by the **Permission Manager**
+(`agent/tools/permission_manager.py`) before the Dispatcher executes it.
+
+```python
+from agent.tools.registry import build_full_registry
+from agent.tools.permission_manager import PermissionManager
+from agent.tools.dispatcher import Dispatcher
+
+reg = build_full_registry()          # all tools, incl. computer-control
+mgr = PermissionManager(registry=reg) # all ON except the 5 locked denials
+disp = Dispatcher(reg, workspace=".", permission_manager=mgr)
+
+# Discover everything the agent can do:
+for t in reg.discover(mgr):
+    print(t["name"], "| enabled:", t["enabled"], "|", t["description"][:60])
+
+# Check / toggle a permission:
+print(mgr.check("file_delete", {"path": "x"}).needs_confirmation)  # True
+mgr.disable("tool:screen_record")   # toggle OFF (persists to permission_state.json)
+mgr.enable("tool:screen_record")    # toggle back ON
+```
+
+Rules (ahsan's standing order):
+- **All permissions default ON** — OS-level, credentials, production, browser,
+  everything — except the 5 hard denials.
+- The 5 denials (`container_escape`, `boot_recovery`, `av_edr_disable`,
+  `billing_fraud`, `exfiltration`) are locked OFF at the execution layer
+  (`agent/tools/permission_gate.py`) and can never be self-granted —
+  `perm_grant` refuses them.
+- Destructive actions (`file_delete`, `app_close`, `app_uninstall`,
+  `process_kill`, `memory_delete`, `service_control stop/restart`) require
+  `confirm=true` while the `safety:destructive_confirmation` toggle is ON
+  (default ON). The dispatcher returns `CONFIRMATION_REQUIRED` otherwise.
+- Full permission catalog: `agent/configs/PERMISSIONS.md` (155 policy items)
+  and `agent/configs/COMPUTER_CONTROL_PERMISSIONS.md` (128 computer-control
+  items, 9 categories).
+
+### Computer-control tools (9 categories)
+
+| Category | Module | Examples |
+|----------|--------|----------|
+| Screen & Vision | `agent/tools/vision_tools.py` | `screen_shot`, `screen_record`, `ui_element_detect`, `visual_grounding` |
+| Mouse Control | `agent/tools/input_tools.py` | `mouse_move`, `mouse_click`, `mouse_drag`, `mouse_scroll` |
+| Keyboard Control | `agent/tools/input_tools.py` | `key_press`, `key_hotkey`, `key_type`, `clipboard_copy` |
+| Live Browser | `agent/tools/browser_tools.py` | `browser_new_tab`, `browser_click`, `browser_fill`, `browser_js`, `browser_network` |
+| File Management | `agent/tools/filemgmt_tools.py` | `file_append`, `file_copy`, `file_move`, `file_delete` (trash), `file_watch` |
+| Application Control | `agent/tools/app_tools.py` | `app_launch`, `app_list`, `app_install`, `process_kill`, `service_control` |
+| Coding & Tools | `agent/tools/code_tools.py` | `git_clone`, `git_pull`, `git_push`, `code_lint`, `tool_test`, `cron_add` |
+| Memory & Automation | `agent/tools/memory_tools.py` | `memory_save`, `macro_replay`, `workflow_run`, `parallel_run`, `retry_backoff` |
+| Access & Safety | `agent/tools/safety_tools.py` | `perm_check`, `perm_grant`, `audit_log`, `safe_mode`, `health_check` |
+
+Each module exposes `TOOL_DEFS` (name, description, input schema, profile,
+timeout) and `HANDLERS` (real implementations). The registry auto-registers
+them via `build_full_registry()`; the dispatcher routes them generically.
+
 ---
 
 ## 7. Planning
