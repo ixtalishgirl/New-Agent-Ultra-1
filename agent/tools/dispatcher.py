@@ -6,6 +6,12 @@ from .registry import ToolRegistry
 from .permission_gate import check_tool_call
 from ..execution.python_runner import run_python, ExecResult
 from ..execution.shell_runner import run_shell
+from .git_tools import GitTools
+from .file_tools import FileTools
+from .network_tools import NetworkTools
+from .data_tools import DataTools
+from .system_tools import SystemTools
+from . import media_tools
 
 
 @dataclass
@@ -18,6 +24,93 @@ class Dispatcher:
     def __init__(self, registry: ToolRegistry, workspace: str):
         self.registry = registry
         self.workspace = workspace
+        self._git: GitTools | None = None
+        self._git_failed = False
+        self._files: FileTools | None = None
+        self._net: NetworkTools | None = None
+        self._data: DataTools | None = None
+        self._sys: SystemTools | None = None
+
+    # -- lazy tool-module accessors --------------------------------------
+    @property
+    def git(self) -> GitTools:
+        if self._git is None and not self._git_failed:
+            try:
+                self._git = GitTools()
+            except RuntimeError:
+                self._git_failed = True
+                raise
+        if self._git is None:
+            raise RuntimeError("git binary not available")
+        return self._git
+
+    @property
+    def files(self) -> FileTools:
+        if self._files is None:
+            self._files = FileTools()
+        return self._files
+
+    @property
+    def net(self) -> NetworkTools:
+        if self._net is None:
+            self._net = NetworkTools()
+        return self._net
+
+    @property
+    def data(self) -> DataTools:
+        if self._data is None:
+            self._data = DataTools()
+        return self._data
+
+    @property
+    def sys(self) -> SystemTools:
+        if self._sys is None:
+            self._sys = SystemTools()
+        return self._sys
+
+    def _media(self, name: str, args: dict) -> "DispatchResult":
+        """Dispatch media tool calls."""
+        import json as _json
+        funcs = {
+            "image_info": media_tools.image_info,
+            "image_resize": lambda a: media_tools.image_resize(
+                a["path"], a["width"], a["height"], a.get("output")),
+            "image_convert": lambda a: media_tools.image_convert(
+                a["path"], a["format"], a.get("output")),
+            "image_thumbnail": lambda a: media_tools.image_thumbnail(
+                a["path"], a.get("size", 128), a.get("output")),
+            "audio_info": media_tools.audio_info,
+            "video_info": media_tools.video_info,
+        }
+        fn = funcs.get(name)
+        if not fn:
+            return DispatchResult(ok=False, output=f"Unknown media tool: {name}")
+        try:
+            if name in ("image_info", "audio_info", "video_info"):
+                result = fn(args.get("path", ""))
+            else:
+                result = fn(args)
+            ok = result.get("ok", True)
+            return DispatchResult(ok=ok, output=_json.dumps(result, indent=2, default=str))
+        except Exception as e:
+            return DispatchResult(ok=False, output=f"Media tool error: {e}")
+
+    @staticmethod
+    def _wrap(result) -> "DispatchResult":
+        """Convert a GitResult/FileResult/NetResult/DataResult/SysResult
+        into a DispatchResult, appending parsed JSON for machine use."""
+        out = result.output or ""
+        parsed = getattr(result, "parsed", None)
+        if parsed:
+            try:
+                out += "\n[parsed]\n" + json.dumps(parsed, indent=2,
+                                                   default=str)[:8000]
+            except Exception:
+                pass
+        err = getattr(result, "error", "")
+        if not result.ok and err and err not in out:
+            out += f"\nError: {err}"
+        return DispatchResult(ok=bool(result.ok), output=out)
 
     def dispatch(self, name: str, args: dict) -> DispatchResult:
         tool = self.registry.get(name)
@@ -52,6 +145,85 @@ class Dispatcher:
             return self._web_search(str(args.get("query", "")))
         elif name == "germany_fetch":
             return self._germany_fetch(str(args.get("url", "")))
+        # ---- git tools ----
+        elif name == "git_status":
+            return self._wrap(self.git.status(path=args.get("path") or None))
+        elif name == "git_log":
+            return self._wrap(self.git.log(
+                path=args.get("path") or None,
+                max_count=int(args.get("max_count", 20)),
+                branch=str(args.get("branch", "")),
+                since=str(args.get("since", "")),
+                author=str(args.get("author", "")),
+                grep=str(args.get("grep", "")),
+                pathspec=str(args.get("pathspec", ""))))
+        elif name == "git_diff":
+            return self._wrap(self.git.diff(
+                path=args.get("path") or None,
+                staged=bool(args.get("staged", False)),
+                commit_a=str(args.get("commit_a", "")),
+                commit_b=str(args.get("commit_b", "")),
+                pathspec=str(args.get("pathspec", ""))))
+        elif name == "git_branch":
+            return self._git_branch(args)
+        elif name == "git_commit":
+            return self._git_commit(args)
+        # ---- file tools ----
+        elif name == "file_tree":
+            return self._wrap(self.files.list_tree(
+                path=args.get("path", "."),
+                max_depth=int(args.get("max_depth", 5)),
+                include_hidden=bool(args.get("include_hidden", False)),
+                extensions=args.get("extensions")))
+        elif name == "file_find":
+            return self._wrap(self.files.find_by_pattern(
+                root=args.get("root", "."),
+                name_glob=str(args.get("name_glob", "*")),
+                content_regex=str(args.get("content_regex", "")),
+                max_results=int(args.get("max_results", 200)),
+                extensions=args.get("extensions")))
+        elif name == "file_checksum":
+            return self._wrap(self.files.checksum(
+                str(args.get("path", "")),
+                algorithm=str(args.get("algorithm", "sha256"))))
+        # ---- network tools ----
+        elif name == "http_get":
+            return self._wrap(self.net.http_get(
+                str(args.get("url", "")),
+                headers=args.get("headers"),
+                params=args.get("params"),
+                timeout=int(args.get("timeout", 20)) or None))
+        elif name == "http_post":
+            return self._wrap(self.net.http_post(
+                str(args.get("url", "")),
+                data=args.get("data"),
+                json_data=args.get("json_data"),
+                headers=args.get("headers"),
+                timeout=int(args.get("timeout", 20)) or None))
+        elif name == "dns_lookup":
+            return self._wrap(self.net.dns_lookup(str(args.get("hostname", ""))))
+        elif name == "port_check":
+            ports = args.get("ports", [])
+            if isinstance(ports, str):
+                ports = [int(p.strip()) for p in ports.split(",") if p.strip()]
+            return self._wrap(self.net.port_check(
+                str(args.get("host", "")),
+                [int(p) for p in ports]))
+        # ---- data tools ----
+        elif name == "json_validate":
+            return self._wrap(self.data.json_parse_validate(
+                str(args.get("text", "")),
+                schema=args.get("schema")))
+        elif name == "csv_stats":
+            return self._csv_stats(args)
+        # ---- system tools ----
+        elif name == "sysinfo":
+            return self._wrap(self.sys.sysinfo())
+        elif name == "disk_usage":
+            return self._wrap(self.sys.disk_usage(str(args.get("path", "/"))))
+        elif name in ("image_info", "image_resize", "image_convert",
+                      "image_thumbnail", "audio_info", "video_info"):
+            return self._media(name, args)
         else:
             return DispatchResult(
                 ok=False,
@@ -59,6 +231,77 @@ class Dispatcher:
                        f"(browser/supabase/self_modify/tool_create land in later phases).")
         out = f"exit={r.exit_code} duration_ms={r.duration_ms}\nSTDOUT:\n{r.stdout}\nSTDERR:\n{r.stderr}"
         return DispatchResult(ok=r.ok, output=out)
+
+    def _git_branch(self, args: dict) -> DispatchResult:
+        """git_branch dispatcher: action=list|create|delete|checkout."""
+        action = str(args.get("action", "list")).lower()
+        path = args.get("path") or None
+        if action == "list":
+            return self._wrap(self.git.branch_list(
+                path=path,
+                include_remote=bool(args.get("include_remote", False))))
+        if action == "create":
+            name = str(args.get("name", ""))
+            if not name:
+                return DispatchResult(ok=False, output="git_branch create needs 'name'")
+            return self._wrap(self.git.branch_create(
+                name,
+                start_point=str(args.get("start_point", "HEAD")),
+                checkout_after=bool(args.get("checkout_after", False)),
+                path=path))
+        if action == "delete":
+            name = str(args.get("name", ""))
+            if not name:
+                return DispatchResult(ok=False, output="git_branch delete needs 'name'")
+            return self._wrap(self.git.branch_delete(
+                name, force=bool(args.get("force", False)), path=path))
+        if action == "checkout":
+            ref = str(args.get("name") or args.get("ref", ""))
+            if not ref:
+                return DispatchResult(ok=False, output="git_branch checkout needs 'name'/'ref'")
+            return self._wrap(self.git.checkout(
+                ref, create=bool(args.get("create", False)), path=path))
+        return DispatchResult(ok=False,
+                              output=f"Unknown git_branch action: {action} "
+                                     f"(list|create|delete|checkout)")
+
+    def _git_commit(self, args: dict) -> DispatchResult:
+        """git_commit dispatcher: optionally stage `add` paths first, then commit."""
+        path = args.get("path") or None
+        message = str(args.get("message", ""))
+        if not message.strip():
+            return DispatchResult(ok=False, output="git_commit needs 'message'")
+        staged: list[str] = []
+        add = args.get("add")
+        if add:
+            specs = [add] if isinstance(add, str) else list(add)
+            r = self.git.add(specs, path=path)
+            if not r.ok:
+                return self._wrap(r)
+            staged = specs
+        r = self.git.commit(
+            message, path=path,
+            amend=bool(args.get("amend", False)),
+            allow_empty=bool(args.get("allow_empty", False)),
+            author=str(args.get("author", "")))
+        out = self._wrap(r)
+        if staged and out.ok:
+            out.output = f"Staged {staged}, then committed.\n" + out.output
+        return out
+
+    def _csv_stats(self, args: dict) -> DispatchResult:
+        """csv_stats dispatcher: read CSV from text/path, then compute stats."""
+        text = str(args.get("text", ""))
+        path = args.get("path") or None
+        if not text and not path:
+            return DispatchResult(ok=False,
+                                  output="csv_stats needs 'text' or 'path'")
+        rr = self.data.csv_read(text=text, path=path)
+        if not rr.ok:
+            return self._wrap(rr)
+        cols = args.get("columns")
+        return self._wrap(self.data.csv_stats(rr.parsed["records"],
+                                              columns=cols))
 
     def _file_read(self, path: str) -> DispatchResult:
         try:

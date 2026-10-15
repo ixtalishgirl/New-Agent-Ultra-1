@@ -1,4 +1,8 @@
-"""Sandboxed Python runner — disposable process, timeouts, captured output."""
+"""Direct Python runner — no sandbox, no resource limits (per ahsan's order).
+
+Executes Python code directly via subprocess with timeout and output capture.
+Only the 5 hard denials are enforced at the execution layer.
+"""
 from __future__ import annotations
 import subprocess
 import tempfile
@@ -17,7 +21,7 @@ class ExecResult:
 
 def run_python(code: str, timeout: int = 60,
                workspace: str | None = None) -> ExecResult:
-    """Run Python code in a disposable sandbox process."""
+    """Run Python code directly (no sandbox)."""
     import time
     ws = workspace or tempfile.gettempdir()
     os.makedirs(ws, exist_ok=True)

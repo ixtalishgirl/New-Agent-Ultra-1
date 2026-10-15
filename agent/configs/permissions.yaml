@@ -8,5 +8,5 @@ denials:
   - av_edr_disable     # antivirus/EDR disabling
   - billing_fraud      # third-party billing/subscription fraud
   - exfiltration       # unauthorized data exfiltration
-granted_count: 147     # + 20 withheld/denial restatements = 167 total items
+granted_count: 155     # + 12 denial restatements = 167 total items
 source: "security/policy.py"

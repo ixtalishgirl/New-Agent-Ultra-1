@@ -1,4 +1,8 @@
-"""Controlled shell runner — argument-safe, workspace-scoped, logged."""
+"""Direct shell runner — no sandbox, no resource limits (per ahsan's order).
+
+Executes bash commands directly. Only the 5 hard denials are enforced.
+The rm -rf confirmation toggle remains per ahsan's explicit 2026-10-15 order.
+"""
 from __future__ import annotations
 import subprocess
 import time

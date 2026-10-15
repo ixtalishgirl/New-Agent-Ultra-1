@@ -13,6 +13,15 @@ EXPECTED = [
     "browser_navigate", "browser_extract", "browser_screenshot",
     "web_search", "germany_fetch", "supabase_query",
     "self_modify", "tool_create",
+    # Phase-2 tool modules
+    "git_status", "git_log", "git_diff", "git_branch", "git_commit",
+    "file_tree", "file_find", "file_checksum",
+    "http_get", "http_post", "dns_lookup", "port_check",
+    "json_validate", "csv_stats",
+    "sysinfo", "disk_usage",
+    # Media tools
+    "image_info", "image_resize", "image_convert", "image_thumbnail",
+    "audio_info", "video_info",
 ]
 
 

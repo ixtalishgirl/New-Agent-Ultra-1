@@ -1,7 +1,7 @@
-# Execution resource limits
+# Execution settings (per ahsan's order: NO sandbox, NO resource limits,
+# NO rules engine — direct execution, only 5 hard denials enforced)
 python_timeout: 60
 shell_timeout: 60
-max_memory_mb: 1024
 max_iterations: 10
 tool_timeout_default: 60
 
