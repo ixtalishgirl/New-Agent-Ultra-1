@@ -1,8 +1,0 @@
-{
-  "name": "Halye AI Assistant",
-  "description": "Autonomous AI Developer Studio with live real-time website builder, protected containerized iframe preview & multi-model squad orchestration.",
-  "requestFramePermissions": [],
-  "majorCapabilities": [
-    "MAJOR_CAPABILITY_SELF_HOSTED_HALEY_API"
-  ]
-}

@@ -4,3 +4,7 @@ shell_timeout: 60
 max_memory_mb: 1024
 max_iterations: 10
 tool_timeout_default: 60
+
+# Destructive-action confirmation (ahsan's toggle, default ON)
+# Set to true to allow rm -rf etc. without per-command approval
+allow_destructive: false

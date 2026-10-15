@@ -1,9 +1,0 @@
-[
-  {
-    "id": "haley-default",
-    "name": "Haley (Llama-3-8B, Self-Hosted)",
-    "apiUrl": "${HALEY_API_URL}",
-    "maxTokens": 1024,
-    "createdAt": "2026-10-06T00:00:00.000Z"
-  }
-]

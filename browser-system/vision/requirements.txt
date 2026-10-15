@@ -1,3 +1,0 @@
-requests>=2.31
-# test-only (not needed at runtime):
-# pytest>=8.0
