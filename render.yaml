@@ -3,7 +3,7 @@ services:
     name: haley-agent
     runtime: python
     plan: free
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements.txt && npm --prefix dashboard install --no-audit --no-fund && npm --prefix dashboard run build
     startCommand: python3 -m agent.api.server
     envVars:
       - key: PYTHON_VERSION
