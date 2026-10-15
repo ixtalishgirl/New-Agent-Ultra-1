@@ -41,10 +41,16 @@ class TestImports(unittest.TestCase):
 
     def test_system_prompt_contains_all_powers(self):
         from agent.model.prompt_builder import build_system_prompt
+        from agent.tools.registry import build_full_registry
+        from agent.tools.permission_manager import build_manager
         prompt = build_system_prompt()
-        self.assertIn("147", prompt)
+        reg = build_full_registry()
+        enabled, total = build_manager(reg).count_enabled()
+        self.assertIn(str(enabled), prompt)
         self.assertIn("shell", prompt)
         self.assertIn("YOU MUST USE THESE TOOLS", prompt)
+        for t in reg.discover():
+            self.assertIn(t["name"], prompt)
 
 
 if __name__ == "__main__":

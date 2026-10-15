@@ -23,6 +23,7 @@ sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent.parent.parent
 from agent.app.orchestrator import Orchestrator
 from agent.tools.registry import build_full_registry as default_registry
 from agent.tools.dispatcher import Dispatcher
+from agent.tools.permission_manager import build_manager
 from agent.security.audit_log import AuditLog
 
 
@@ -48,6 +49,14 @@ def check_auth(handler: BaseHTTPRequestHandler) -> bool:
     return False
 
 
+def _make_dispatcher(workspace: str) -> Dispatcher:
+    """Dispatcher with the Permission Manager wired in (all ON except the
+    5 locked denials). Single shared construction point."""
+    reg = default_registry()
+    return Dispatcher(reg, workspace=workspace,
+                      permission_manager=build_manager(reg))
+
+
 def _make_orchestrator():
     """Build the orchestrator the same way the CLI does (provider + dispatcher).
     Model URL resolves from HALEY_API_URL (set on Render to the ngrok tunnel)."""
@@ -58,7 +67,7 @@ def _make_orchestrator():
     )
     provider = QwenAdapter(base_url=base_url)
     workspace = os.environ.get("AGENT_WORKSPACE", str(Path.home() / "workspace"))
-    dispatcher = Dispatcher(default_registry(), workspace=workspace)
+    dispatcher = _make_dispatcher(workspace)
     return Orchestrator(provider, dispatcher)
 
 
@@ -145,20 +154,18 @@ class Handler(BaseHTTPRequestHandler):
                 "note": "ngrok tunnel managed externally (Kaggle GPU side)",
             })
         if path == "/api/permissions":
-            from ..security import ALL_GRANTED, DENIAL_DESCRIPTIONS
-            granted = [
-                {"id": i, "category": cat, "text": text}
-                for (i, cat, text) in ALL_GRANTED
-            ]
-            denials = [
-                {"id": k, "description": v}
-                for k, v in DENIAL_DESCRIPTIONS.items()
-            ]
+            reg = default_registry()
+            pm = build_manager(reg)
+            perms = pm.list_all()
             return self._json(200, {
-                "granted_count": len(granted),
-                "denied_count": len(denials),
-                "granted": granted,
-                "denials": denials,
+                "total": len(perms),
+                "enabled": sum(1 for p in perms if p["enabled"]),
+                "locked": sum(1 for p in perms if p.get("locked")),
+                "permissions": [
+                    {"name": p["title"], "category": p["category"],
+                     "enabled": p["enabled"], "locked": bool(p.get("locked"))}
+                    for p in perms
+                ],
             })
         if path == "/api/browser/shot":
             qs = urllib.parse.urlparse(self.path).query
@@ -167,7 +174,7 @@ class Handler(BaseHTTPRequestHandler):
             if not url:
                 return self._json(400, {"error": "url required"})
             try:
-                disp = Dispatcher(default_registry(), workspace=os.getcwd())
+                disp = _make_dispatcher(os.getcwd())
                 res = disp.dispatch("browser_screenshot", {"url": url})
                 if not res.ok:
                     return self._json(502, {"error": res.output[:300]})
@@ -195,7 +202,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not Handler.orchestrator:
                     Handler.orchestrator = _make_orchestrator()
                 result = Handler.orchestrator.run(prompt)
-                return self._json(200, {"success": True, **result})
+                data = result.to_dict() if hasattr(result, "to_dict") else dict(result)
+                return self._json(200, {"success": True, **data})
             except Exception as e:
                 return self._json(500, {"success": False, "error": str(e)[:500]})
 
@@ -204,7 +212,7 @@ class Handler(BaseHTTPRequestHandler):
             args = body.get("args", {})
             audit.record("tool_execute", details={"tool": name})
             try:
-                disp = Dispatcher(default_registry(), workspace=os.getcwd())
+                disp = _make_dispatcher(os.getcwd())
                 res = disp.dispatch(name, args)
                 return self._json(200, {
                     "success": res.ok,
