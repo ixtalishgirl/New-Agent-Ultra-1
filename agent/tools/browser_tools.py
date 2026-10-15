@@ -185,6 +185,18 @@ def _ensure_daemon() -> tuple[Optional[int], str]:
     if not _playwright_available():
         return None, ("playwright not installed "
                       "(pip install playwright && playwright install chromium)")
+    # Self-heal: download the browser binary at runtime when the build-time
+    # install never landed (wrong HOME, silent `|| true` failure, ...).
+    try:
+        try:
+            from agent.browser.ensure_browser import ensure_browser_installed
+        except ImportError:
+            from ..browser.ensure_browser import ensure_browser_installed
+        _ok, _msg = ensure_browser_installed()
+        if not _ok:
+            return None, _msg
+    except Exception as e:
+        return None, f"browser install check failed: {e}"
     try:
         BASE_DIR.mkdir(parents=True, exist_ok=True)
         DAEMON_SCRIPT.write_text(_DAEMON_SRC)

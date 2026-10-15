@@ -62,7 +62,25 @@ class PlaywrightRunner:
     def __init__(self, timeout: int = 60):
         self.timeout = timeout
 
+    @staticmethod
+    def _ensure() -> dict | None:
+        """Make sure a browser binary exists; return error dict or None."""
+        try:
+            from .ensure_browser import ensure_browser_installed
+        except Exception:
+            try:
+                from agent.browser.ensure_browser import ensure_browser_installed
+            except Exception as e:
+                return {"error": f"browser ensure helper unavailable: {e}"}
+        ok, msg = ensure_browser_installed()
+        if not ok:
+            return {"error": msg}
+        return None
+
     def _run(self, args: dict) -> dict:
+        err = self._ensure()
+        if err:
+            return err
         with tempfile.TemporaryDirectory() as tmpdir:
             script = Path(tmpdir) / "pw.py"
             script.write_text(BROWSER_SCRIPT)
@@ -84,6 +102,9 @@ class PlaywrightRunner:
 
     def screenshot(self, url: str, path: str = "/tmp/shot.png") -> dict:
         """Screenshot a page."""
+        err = self._ensure()
+        if err:
+            return err
         with tempfile.TemporaryDirectory() as tmpdir:
             script = Path(tmpdir) / "pw.py"
             script.write_text(BROWSER_SCRIPT)

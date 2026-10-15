@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import socket
 import urllib.parse
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -59,6 +60,35 @@ def _rest_config() -> Optional[tuple[str, str]]:
     return None
 
 
+def _connect_with_ipv4_fallback(dsn: str):
+    """Connect via psycopg2, retrying with a forced-IPv4 dial address.
+
+    Some hosts (e.g. Render) have no IPv6 egress while the DB hostname
+    resolves IPv6-first, producing "Network is unreachable". The retry
+    resolves the hostname to IPv4 itself and passes it as ``hostaddr`` —
+    libpq still uses the original ``host`` for TLS/SNI, only the dial
+    address changes.
+    """
+    import psycopg2  # type: ignore
+    try:
+        return psycopg2.connect(dsn)
+    except Exception as first_err:
+        msg = str(first_err)
+        if "Network is unreachable" not in msg and "could not connect" not in msg:
+            raise
+        parts = urllib.parse.urlparse(dsn)
+        host = parts.hostname or ""
+        port = parts.port or 5432
+        if not host:
+            raise
+        infos = socket.getaddrinfo(host, port, family=socket.AF_INET,
+                                   type=socket.SOCK_STREAM)
+        if not infos:
+            raise
+        ipv4 = infos[0][4][0]
+        return psycopg2.connect(dsn, hostaddr=ipv4)
+
+
 def _run_psycopg2(sql: str, dsn: str) -> SupabaseResult:
     try:
         import psycopg2  # type: ignore
@@ -66,7 +96,7 @@ def _run_psycopg2(sql: str, dsn: str) -> SupabaseResult:
     except ImportError:
         return SupabaseResult(ok=False, error="psycopg2 not installed")
     try:
-        conn = psycopg2.connect(dsn)
+        conn = _connect_with_ipv4_fallback(dsn)
         conn.autocommit = True
         try:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
