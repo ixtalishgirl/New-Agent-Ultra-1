@@ -3,6 +3,7 @@
 # Browser + database backends (needed on Render):
 playwright>=1.48.0      # browser automation (Playwright daemon + screenshots)
 psycopg2-binary>=2.9.0  # direct Postgres for supabase_query (CREATE TABLE etc.)
+firebase-admin>=6.0.0   # Firestore: agent memory/data store over HTTPS
 # Optional (later phases):
 # supabase>=2.0.0         # Supabase client (Phase 10+)
 # pytest>=8.0.0           # test suite (Phase 7)

@@ -610,7 +610,7 @@ class Dispatcher:
             return DispatchResult(
                 ok=False,
                 output=f"tool_create saved to {path} but activation failed: {e}")
-        bak_ok, bak_note = ct.backup_to_supabase(safe, code, schema, description)
+        bak_ok, bak_note = ct.backup_tool(safe, code, schema, description)
         return DispatchResult(
             ok=True,
             output=json.dumps({
@@ -619,7 +619,7 @@ class Dispatcher:
                 "description": description,
                 "path": str(path),
                 "active": True,
-                "supabase_backup": bak_ok,
+                "cloud_backup": bak_ok,
                 "note": ("registered and callable immediately via "
                          "Dispatcher.dispatch; ") + bak_note,
             }, indent=1))

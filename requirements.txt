@@ -1,5 +1,6 @@
 # Haley agent — runtime dependencies (installed on Render via render.yaml).
 playwright>=1.48.0      # real Chromium automation (browser tools, screenshots)
 psycopg2-binary>=2.9.0  # direct Postgres for supabase_query (CREATE TABLE etc.)
+firebase-admin>=6.0.0   # Firestore: agent memory/data store over HTTPS
 # Optional (install only if needed for full powers):
 # requests        # used only if stdlib urllib is insufficient

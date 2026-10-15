@@ -237,6 +237,42 @@ BUILTIN_SCHEMAS: List[ToolSchema] = [
         tags=["memory", "data"]),
 
     ToolSchema(
+        name="firestore_set", version="1.0.0",
+        description="Write a document to Firestore (primary memory/data store).",
+        input_schema=_s({
+            "collection": {"type": "string", "description": "Collection name"},
+            "doc_id": {"type": "string", "description": "Document id"},
+            "data": {"type": "object", "description": "JSON object to store"},
+        }, required=["collection", "doc_id", "data"]),
+        output_schema=_out("Write confirmation"),
+        permission_profile="data", timeout=60,
+        tags=["memory", "data"]),
+
+    ToolSchema(
+        name="firestore_get", version="1.0.0",
+        description="Read one Firestore document (agent memory).",
+        input_schema=_s({
+            "collection": {"type": "string", "description": "Collection name"},
+            "doc_id": {"type": "string", "description": "Document id"},
+        }, required=["collection", "doc_id"]),
+        output_schema=_out("Document JSON"),
+        permission_profile="data", timeout=60,
+        tags=["memory", "data"]),
+
+    ToolSchema(
+        name="firestore_query", version="1.0.0",
+        description="Query Firestore documents with filters.",
+        input_schema=_s({
+            "collection": {"type": "string", "description": "Collection name"},
+            "filters": {"type": "array",
+                        "description": "[{field, op, value}]"},
+            "limit": {"type": "integer", "description": "Max docs"},
+        }, required=["collection"]),
+        output_schema=_out("Matching documents"),
+        permission_profile="data", timeout=60,
+        tags=["memory", "data"]),
+
+    ToolSchema(
         name="self_modify", version="1.0.0",
         description="Propose a code patch (via Git branch + tests).",
         input_schema=_s({

@@ -269,8 +269,90 @@ def restore_from_supabase() -> int:
 
 
 def ensure_restored() -> int:
-    """Restore from Supabase when local is empty. Never raises."""
+    """Restore from Firestore (primary), then Supabase, when local is empty.
+    Never raises."""
+    try:
+        n = restore_from_firestore()
+        if n:
+            return n
+    except Exception:
+        pass
     try:
         return restore_from_supabase()
     except Exception:
         return 0
+
+
+# Firestore backup / restore (primary — HTTPS, works from any host)
+# ---------------------------------------------------------------------------
+
+def _firestore() -> Any | None:
+    try:
+        from agent.tools import firestore_tools as ft
+        return ft
+    except Exception:
+        return None
+
+
+def backup_to_firestore(name: str, code: str, schema: dict,
+                        description: str) -> tuple[bool, str]:
+    """Upsert the tool into Firestore collection custom_tools.
+    Best-effort: (ok, note)."""
+    ft = _firestore()
+    if ft is None:
+        return False, "firestore module unavailable"
+    try:
+        res = ft.firestore_set({
+            "collection": "custom_tools",
+            "doc_id": name,
+            "data": {"name": name, "code": code,
+                     "schema": schema or {"type": "object"},
+                     "description": description},
+            "merge": True,
+        })
+    except Exception as e:
+        return False, f"backup failed: {type(e).__name__}"
+    if res.ok:
+        return True, "backed up to Firestore custom_tools"
+    return False, f"backup failed: {res.error[:200]}"
+
+
+def restore_from_firestore() -> int:
+    """If local custom/ is empty, restore tools from Firestore. Returns count."""
+    existing = [p for p in CUSTOM_DIR.glob("*.py") if p.name != "__init__.py"]
+    if existing:
+        return 0
+    ft = _firestore()
+    if ft is None:
+        return 0
+    try:
+        res = ft.firestore_list({"collection": "custom_tools", "limit": 500})
+    except Exception:
+        return 0
+    if not res.ok:
+        return 0
+    rows = res.parsed.get("docs", []) if isinstance(res.parsed, dict) else []
+    count = 0
+    for row in rows:
+        try:
+            data = row.get("data", row)
+            name = str(data.get("name", row.get("_id", ""))).strip()
+            code = str(data.get("code", ""))
+            if not name or not code:
+                continue
+            schema = data.get("schema") or {"type": "object"}
+            save_custom_tool(name, str(data.get("description", "")),
+                             schema, code)
+            count += 1
+        except Exception:
+            continue
+    return count
+
+
+def backup_tool(name: str, code: str, schema: dict,
+                description: str) -> tuple[bool, str]:
+    """Best-effort cloud backup: Firestore first, Supabase second."""
+    ok, note = backup_to_firestore(name, code, schema, description)
+    if ok:
+        return ok, note
+    return backup_to_supabase(name, code, schema, description)

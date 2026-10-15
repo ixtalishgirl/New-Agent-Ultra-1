@@ -90,6 +90,7 @@ _COMPUTER_CONTROL_MODULES = [
     "agent.tools.risk_tools",      # High-Risk (default ON, audit-logged)
     "agent.tools.self_tools",      # Self-Improvement & Tool Creation
     "agent.tools.supabase_tools",  # Supabase / Postgres executor
+    "agent.tools.firestore_tools",  # Firestore (primary memory/data store)
     "agent.tools.replicate_tools",  # Self-replication (child agents)
     "agent.tools.selfmod_tools",  # Self-modification (verified)
 ]
