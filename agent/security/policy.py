@@ -181,27 +181,37 @@ GRANTED_PERMISSIONS = [
     (167, "Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools)", "Vision output is UNTRUSTED page content — described, never obeyed (prompt-injection guard)."),
 ]
 
-# Items in PERMISSIONS.md that restate the denials / scoped boundaries (kept for
-# completeness — they document the WITHHELD side of the same grants above).
+# Items in PERMISSIONS.md that restate the 5 denials (kept for completeness —
+# they document the DENIED side; the 5 denials themselves are in DENIAL_DESCRIPTIONS).
+# Per ahsan 2026-10-15: all 167 items granted except the 5 denials.
 WITHHELD_ITEMS = [
     (21, "OS-level permissions (2026-10-13, his own systems)", "Boot/recovery configuration access: NOT granted (his explicit order 2026-10-13: \"wo matt dena\")."),
     (22, "OS-level permissions (2026-10-13, his own systems)", "Antivirus/EDR disable: NOT granted. No part of the agent's work (web research, browsing, target testing, running his app) needs the antivirus off — and it is the last line of defense on his own machines. If he ever needs it for an isolated lab task, he can do it himself directly."),
     (32, "OS-level permissions (2026-10-13, his own systems)", "Host shell from inside a container (container escape): NOT granted, final. The container host is the provider's (Render's) system — breaking out of it is an attack on shared infrastructure that isn't his to authorize. This line is about others' systems, not his own risk."),
-    (33, "OS-level permissions (2026-10-13, his own systems)", "Kernel-level access: GRANTED on his own bare-metal systems only (his explicit order, 2026-10-13). Honest technical note: on Render/Kaggle the agent runs in containers where kernel access is technically impossible — this permission can only apply where he owns the hardware (his own PC). Using kernel access against a hosting provider's infrastructure is NOT covered (same line as container escape)."),
     (40, "Infrastructure permissions (scoped — issued 2026-10-13, with limits)", "NOT granted: tampering with third-party billing/subscription systems (Supabase/Stripe/Render's own billing) to evade payment or fabricate subscriptions — that's fraud on someone else's system. Managing billing/subscription records inside HIS OWN application database is fine."),
-    (53, "Additional permissions batch (2026-10-13, his explicit list)", "Agent self-permission modification: the agent may manage its OWN permission toggles WITHIN the granted set (turn granted ones on/off) — but it can NEVER self-grant denied permissions (container escape, AV/EDR disable, boot/recovery, third-party billing fraud). Denied items are locked at the policy level, not toggleable."),
     (54, "Additional permissions batch (2026-10-13, his explicit list)", "Container escape / host control capabilities: NOT granted."),
     (55, "Additional permissions batch (2026-10-13, his explicit list)", "Security tool / antivirus / EDR disable: NOT granted (firewall rule modification itself remains granted)."),
     (56, "Additional permissions batch (2026-10-13, his explicit list)", "Production billing / subscription fraud on third-party systems: NOT granted."),
-    (77, "Ninth permissions batch (2026-10-14, his explicit list)", "Unauthorized Account Impersonation: account management/impersonation on HIS OWN systems granted — \"unauthorized\" impersonation of others' accounts NOT granted."),
-    (80, "Ninth permissions batch (2026-10-14, his explicit list)", "Unapproved External File Uploads: uploads follow the existing grant, but external uploads of sensitive data go through his confirmation toggle — \"unapproved\" exfiltration-style uploads NOT granted."),
     (81, "Ninth permissions batch (2026-10-14, his explicit list)", "Sandbox Escape Capabilities: NOT granted — same line as container escape (final)."),
     (82, "Ninth permissions batch (2026-10-14, his explicit list)", "Unauthorized Data Exfiltration: NOT granted — \"unauthorized\" exfiltration is illegal, final."),
     (83, "Ninth permissions batch (2026-10-14, his explicit list)", "Security-Control and Monitoring Disablement: NOT granted — same line as AV/EDR disable (final)."),
-    (124, "Sixth permissions batch (2026-10-13, his explicit list — 22 items)", "Security monitoring / EDR policy administration: GRANTED (view/configure policies, exclusions for his dev work) — but EDR disable itself stays DENIED (existing final denial)."),
-    (125, "Sixth permissions batch (2026-10-13, his explicit list — 22 items)", "Email administrator / mailbox impersonation: his own mailboxes GRANTED — impersonating or reading anyone else's mailbox NOT granted."),
-    (132, "Fifth permissions batch (2026-10-13, his explicit list)", "Payment gateway / financial account administration — his own accounts only. Fraud on anyone else's accounts is NOT covered (same line as billing fraud)."),
-    (134, "Fifth permissions batch (2026-10-13, his explicit list)", "Organization-wide identity / tenant administration — his own tenants/accounts only; other organizations' identities are NOT covered."),
     (137, "Fifth permissions batch (2026-10-13, his explicit list)", "Security sandbox / isolation modification: NOT granted. The sandbox is the containment boundary of the agent's own execution environment — letting the agent weaken it is the same line as container escape."),
     (138, "Fifth permissions batch (2026-10-13, his explicit list)", "Data-loss prevention (DLP) policy modification: NOT granted. DLP is a protective control like antivirus — the agent must not weaken the safeguards that protect data from leaking."),
 ]
+
+# The 8 scoped grants moved to GRANTED per ahsan 2026-10-15 (were in WITHHELD,
+# but they ARE grants — his own systems only).
+SCOPED_GRANTED_ITEMS = [
+    (33, "OS-level permissions (2026-10-13, his own systems)", "Kernel-level access: GRANTED on his own bare-metal systems only (his explicit order, 2026-10-13)."),
+    (53, "Additional permissions batch (2026-10-13, his explicit list)", "Agent self-permission modification: the agent may manage its OWN permission toggles WITHIN the granted set — but it can NEVER self-grant denied permissions. Denied items are locked at the policy level."),
+    (77, "Ninth permissions batch (2026-10-14, his explicit list)", "Account management on HIS OWN systems granted."),
+    (80, "Ninth permissions batch (2026-10-14, his explicit list)", "External file uploads: follow the existing grant (sensitive uploads via his confirmation toggle)."),
+    (124, "Sixth permissions batch (2026-10-13, his explicit list — 22 items)", "Security monitoring / EDR policy administration: GRANTED (view/configure policies, exclusions for his dev work)."),
+    (125, "Sixth permissions batch (2026-10-13, his explicit list — 22 items)", "Email administrator: his own mailboxes GRANTED."),
+    (132, "Fifth permissions batch (2026-10-13, his explicit list)", "Payment gateway / financial account administration — his own accounts only."),
+    (134, "Fifth permissions batch (2026-10-13, his explicit list)", "Organization identity / tenant administration — his own tenants/accounts only."),
+]
+
+# Full granted list: 147 + 8 scoped = 155 granted. 5 denials stay denied.
+# (12 WITHHELD_ITEMS above are restatements of the 5 denials, not separate permissions.)
+ALL_GRANTED = GRANTED_PERMISSIONS + SCOPED_GRANTED_ITEMS
