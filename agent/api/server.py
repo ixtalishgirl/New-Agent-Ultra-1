@@ -13,6 +13,7 @@ import json
 import mimetypes
 import os
 import urllib.parse
+import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -116,7 +117,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True, "agent": "haley-py"})
         if path == "/api/ip":
             # Egress IP + geolocation check (for Germany/region verification)
-            import urllib.request
             try:
                 with urllib.request.urlopen("http://ip-api.com/json/", timeout=10) as r:
                     data = json.loads(r.read().decode())
