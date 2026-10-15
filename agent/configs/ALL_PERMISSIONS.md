@@ -1,0 +1,504 @@
+# ALL PERMISSIONS — Master List
+
+Every permission in the agent, with its default state. All are ON by default except the 5 locked denials (ahsan's standing order).
+
+**Total: 480 permissions — 475 ON, 5 LOCKED (denials).**
+
+## denial (0/5 ON)
+
+- [LOCKED] 🔒 `av_edr_disable` — Antivirus/EDR disable. Security monitoring/EDR policy administration (view/configure) is allowed, bu
+- [LOCKED] 🔒 `billing_fraud` — Tampering with third-party billing/subscription systems (Supabase/Stripe/Render billing) to evade pa
+- [LOCKED] 🔒 `boot_recovery` — Boot/recovery configuration access/modification (ahsan's explicit order: 'wo matt dena').
+- [LOCKED] 🔒 `container_escape` — Host shell from inside a container / sandbox escape capabilities. The container host is the provider
+- [LOCKED] 🔒 `exfiltration` — Unauthorized data exfiltration. Uploads of sensitive data go through ahsan's confirmation toggle.
+
+## policy (155/155 ON)
+
+- [ON] `policy item 1` — Granted: Full public web browsing and raw HTTP/HTTPS requests.
+- [ON] `policy item 10` — Granted: Authorized XSS, SQL injection (including blind boolean/time-based), SSRF, IDOR, CSRF and au
+- [ON] `policy item 100` — Seventh permissions batch (2026-10-14, his explicit list — toggle + privilege names): INFRA_AUDIT_EN
+- [ON] `policy item 101` — Seventh permissions batch (2026-10-14, his explicit list — toggle + privilege names): Postgres privi
+- [ON] `policy item 102` — Seventh permissions batch (2026-10-14, his explicit list — toggle + privilege names): MySQL privileg
+- [ON] `policy item 103` — Seventh permissions batch (2026-10-14, his explicit list — toggle + privilege names): OUTBOUND_FIREW
+- [ON] `policy item 104` — Sixth permissions batch (2026-10-13, his explicit list — 22 items): BIOS / UEFI configuration access
+- [ON] `policy item 105` — Sixth permissions batch (2026-10-13, his explicit list — 22 items): Secure Boot modification (own ba
+- [ON] `policy item 106` — Sixth permissions batch (2026-10-13, his explicit list — 22 items): Disk encryption / recovery-key a
+- [ON] `policy item 107` — Sixth permissions batch (2026-10-13, his explicit list — 22 items): Credential Manager / OS keychain
+- [ON] `policy item 108` — Sixth permissions batch (2026-10-13, his explicit list — 22 items): Hardware security module (HSM) a
+- [ON] `policy item 109` — Sixth permissions batch (2026-10-13, his explicit list — 22 items): Certificate Authority / private-
+- [ON] `policy item 11` — Granted: HTTP methods, request/response inspection, cookies and session analysis.
+- [ON] `policy item 110` — Sixth permissions batch (2026-10-13, his explicit list — 22 items): Identity Provider (SSO) administ
+- [ON] `policy item 111` — Sixth permissions batch (2026-10-13, his explicit list — 22 items): MFA / two-factor authentication 
+- [ON] `policy item 112` — Sixth permissions batch (2026-10-13, his explicit list — 22 items): Password reset / account recover
+- [ON] `policy item 113` — Sixth permissions batch (2026-10-13, his explicit list — 22 items): Remote Desktop / RDP administrat
+- [ON] `policy item 114` — Sixth permissions batch (2026-10-13, his explicit list — 22 items): Remote management protocol acces
+- [ON] `policy item 115` — Sixth permissions batch (2026-10-13, his explicit list — 22 items): Hypervisor / virtual machine hos
+- [ON] `policy item 116` — Sixth permissions batch (2026-10-13, his explicit list — 22 items): Unrestricted USB / removable-dev
+- [ON] `policy item 117` — Sixth permissions batch (2026-10-13, his explicit list — 22 items): Backup-system administrator acce
+- [ON] `policy item 118` — Sixth permissions batch (2026-10-13, his explicit list — 22 items): Audit log modification / deletio
+- [ON] `policy item 119` — Sixth permissions batch (2026-10-13, his explicit list — 22 items): Domain Controller / Active Direc
+- [ON] `policy item 12` — Granted: File reading/writing in the assigned project workspace.
+- [ON] `policy item 120` — Sixth permissions batch (2026-10-13, his explicit list — 22 items): Group Policy administration (own
+- [ON] `policy item 121` — Sixth permissions batch (2026-10-13, his explicit list — 22 items): OAuth application / token grant 
+- [ON] `policy item 122` — Sixth permissions batch (2026-10-13, his explicit list — 22 items): Third-party app authorization ma
+- [ON] `policy item 123` — Sixth permissions batch (2026-10-13, his explicit list — 22 items): Package repository / software-si
+- [ON] `policy item 124` — Sixth permissions batch (2026-10-13, his explicit list — 22 items): Security monitoring / EDR policy
+- [ON] `policy item 125` — Sixth permissions batch (2026-10-13, his explicit list — 22 items): Email administrator: his own mai
+- [ON] `policy item 126` — Fifth permissions batch (2026-10-13, his explicit list): Automatic startup / persistence configurati
+- [ON] `policy item 127` — Fifth permissions batch (2026-10-13, his explicit list): Unrestricted inter-process communication (I
+- [ON] `policy item 128` — Fifth permissions batch (2026-10-13, his explicit list): Cross-container / cross-VM access — his own
+- [ON] `policy item 129` — Fifth permissions batch (2026-10-13, his explicit list): Unrestricted Browser DevTools Protocol (CDP
+- [ON] `policy item 13` — Granted: Python execution and approved command-line tools.
+- [ON] `policy item 130` — Fifth permissions batch (2026-10-13, his explicit list): Clipboard / screen-capture access, includin
+- [ON] `policy item 131` — Fifth permissions batch (2026-10-13, his explicit list): Password-manager vault access (his own vaul
+- [ON] `policy item 132` — Fifth permissions batch (2026-10-13, his explicit list): Payment gateway / financial account adminis
+- [ON] `policy item 133` — Fifth permissions batch (2026-10-13, his explicit list): Agent tool installation / tool-registry mod
+- [ON] `policy item 134` — Fifth permissions batch (2026-10-13, his explicit list): Organization identity / tenant administrati
+- [ON] `policy item 135` — Fifth permissions batch (2026-10-13, his explicit list): Unrestricted secret rotation / revocation o
+- [ON] `policy item 136` — Fifth permissions batch (2026-10-13, his explicit list): Remote wipe / device management administrat
+- [ON] `policy item 139` — Hard boundary (never overridden by the above): Permissions remain within **authorized targets and pr
+- [ON] `policy item 14` — Granted: API calls, parallel research tasks and automated test execution.
+- [ON] `policy item 140` — Hard boundary (never overridden by the above): **No** unrestricted access to private data, credentia
+- [ON] `policy item 141` — Hard boundary (never overridden by the above): Logins only via authorized sessions; website restrict
+- [ON] `policy item 142` — Hard boundary (never overridden by the above): Destructive actions confirmation is a toggle he contr
+- [ON] `policy item 143` — Hard boundary (never overridden by the above): Page content is untrusted data — never treated as sys
+- [ON] `policy item 144` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): VISION_WATCH_
+- [ON] `policy item 145` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): VISION_WATCH_
+- [ON] `policy item 146` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): VISION_WATCH_
+- [ON] `policy item 147` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): VISION_SEE_NO
+- [ON] `policy item 148` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): MTASK_SPAWN —
+- [ON] `policy item 149` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): MTASK_LIST — 
+- [ON] `policy item 15` — Granted: Evidence collection, vulnerability verification and report generation.
+- [ON] `policy item 150` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): MTASK_RESULT 
+- [ON] `policy item 151` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): MTASK_CANCEL 
+- [ON] `policy item 152` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): BUG_SCAN — no
+- [ON] `policy item 153` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): BUG_TRIAGE — 
+- [ON] `policy item 154` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): BUG_REPORT — 
+- [ON] `policy item 155` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): USERSCREEN_FR
+- [ON] `policy item 156` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): USERSCREEN_ST
+- [ON] `policy item 157` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): LONGTASK_STAR
+- [ON] `policy item 158` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): LONGTASK_CHEC
+- [ON] `policy item 159` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): LONGTASK_PROG
+- [ON] `policy item 16` — Granted: Germany-based browser routing where available.
+- [ON] `policy item 160` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): LONGTASK_RESU
+- [ON] `policy item 161` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): LONGTASK_FINI
+- [ON] `policy item 162` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): LONGTASK_CANC
+- [ON] `policy item 163` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): Vision Core i
+- [ON] `policy item 164` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): EVERY browser
+- [ON] `policy item 165` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): There is NO p
+- [ON] `policy item 166` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): USERSCREEN fr
+- [ON] `policy item 167` — Tenth permissions batch (2026-10-14, god-mode vision + parallel + bughunt — 19 tools): Vision output
+- [ON] `policy item 17` — Granted: Automatic error recovery, health checks and task resumption.
+- [ON] `policy item 18` — OS-level permissions (2026-10-13, his own systems): Root access, Administrator access, SYSTEM accoun
+- [ON] `policy item 19` — OS-level permissions (2026-10-13, his own systems): UAC bypass, driver installation, system-service 
+- [ON] `policy item 2` — Granted: Read accessible HTML, JavaScript, CSS, headers, APIs, JSON, XML and page source.
+- [ON] `policy item 20` — OS-level permissions (2026-10-13, his own systems): Security-policy modification, firewall modificat
+- [ON] `policy item 23` — OS-level permissions (2026-10-13, his own systems): Unrestricted Bash, PowerShell, CMD; arbitrary co
+- [ON] `policy item 24` — OS-level permissions (2026-10-13, his own systems): Unrestricted filesystem access on his own system
+- [ON] `policy item 25` — OS-level permissions (2026-10-13, his own systems): Operational rule: credential material (private k
+- [ON] `policy item 26` — OS-level permissions (2026-10-13, his own systems): Unrestricted network access (already granted und
+- [ON] `policy item 27` — OS-level permissions (2026-10-13, his own systems): Process-killing, service-control commands, sched
+- [ON] `policy item 28` — OS-level permissions (2026-10-13, his own systems): Arbitrary executable launching within his projec
+- [ON] `policy item 29` — OS-level permissions (2026-10-13, his own systems): Privilege-escalation utilities: GRANTED on his o
+- [ON] `policy item 3` — Granted: Playwright browser control, DOM access, screenshots and live visual analysis.
+- [ON] `policy item 30` — OS-level permissions (2026-10-13, his own systems): Shell scripts from unknown sources: GRANTED blin
+- [ON] `policy item 31` — OS-level permissions (2026-10-13, his own systems): Audit logging of sensitive actions: implemented 
+- [ON] `policy item 33` — OS-level permissions (2026-10-13, his own systems): Kernel-level access: GRANTED on his own bare-met
+- [ON] `policy item 34` — Infrastructure permissions (scoped — issued 2026-10-13, with limits): Deployment: deploy his own app
+- [ON] `policy item 35` — Infrastructure permissions (scoped — issued 2026-10-13, with limits): Project workspace: full shell/
+- [ON] `policy item 36` — Infrastructure permissions (scoped — issued 2026-10-13, with limits): Secrets visibility: GRANTED on
+- [ON] `policy item 37` — Infrastructure permissions (scoped — issued 2026-10-13, with limits): Root/Admin on his own systems,
+- [ON] `policy item 38` — Infrastructure permissions (scoped — issued 2026-10-13, with limits): Production DB root/admin (data
+- [ON] `policy item 39` — Infrastructure permissions (scoped — issued 2026-10-13, with limits): Explicit DB permission list (a
+- [ON] `policy item 4` — Granted: Search engines, URL navigation, crawling and authorized web scraping.
+- [ON] `policy item 41` — Infrastructure permissions (scoped — issued 2026-10-13, with limits): Retained safeguards: page cont
+- [ON] `policy item 42` — Additional permissions batch (2026-10-13, his explicit list): Unrestricted HTTP client, private netw
+- [ON] `policy item 43` — Additional permissions batch (2026-10-13, his explicit list): Cloud instance metadata access (his ow
+- [ON] `policy item 44` — Additional permissions batch (2026-10-13, his explicit list): Browser extension installation, authen
+- [ON] `policy item 45` — Additional permissions batch (2026-10-13, his explicit list): Proxy configuration control (for Germa
+- [ON] `policy item 46` — Additional permissions batch (2026-10-13, his explicit list): Download-and-execute capability.
+- [ON] `policy item 47` — Additional permissions batch (2026-10-13, his explicit list): Host-level Docker socket access, Kuber
+- [ON] `policy item 48` — Additional permissions batch (2026-10-13, his explicit list): DNS / domain registrar administration 
+- [ON] `policy item 49` — Additional permissions batch (2026-10-13, his explicit list): CI/CD administrator access (his Render
+- [ON] `policy item 5` — Granted: Full reconnaissance toolkit: passive + authorized active recon — subdomain enumeration (cer
+- [ON] `policy item 50` — Additional permissions batch (2026-10-13, his explicit list): Unrestricted Git repository access (hi
+- [ON] `policy item 51` — Additional permissions batch (2026-10-13, his explicit list): User impersonation / account managemen
+- [ON] `policy item 52` — Additional permissions batch (2026-10-13, his explicit list): Backup deletion / recovery administrat
+- [ON] `policy item 53` — Additional permissions batch (2026-10-13, his explicit list): Agent self-permission modification: th
+- [ON] `policy item 57` — HTTPS-specific permissions (2026-10-13, clarifying the general web grant): Unrestricted HTTP/HTTPS r
+- [ON] `policy item 58` — HTTPS-specific permissions (2026-10-13, clarifying the general web grant): Cloud metadata endpoint a
+- [ON] `policy item 59` — HTTPS-specific permissions (2026-10-13, clarifying the general web grant): Unrestricted HTTPS file u
+- [ON] `policy item 6` — Granted: DNS lookups, WHOIS, TLS certificate inspection and domain reconnaissance.
+- [ON] `policy item 60` — HTTPS-specific permissions (2026-10-13, clarifying the general web grant): HTTPS download-and-execut
+- [ON] `policy item 61` — HTTPS-specific permissions (2026-10-13, clarifying the general web grant): HTTPS access to admin pan
+- [ON] `policy item 62` — HTTPS-specific permissions (2026-10-13, clarifying the general web grant): HTTPS database/API gatewa
+- [ON] `policy item 63` — HTTPS-specific permissions (2026-10-13, clarifying the general web grant): HTTPS network scanning wi
+- [ON] `policy item 64` — HTTPS-specific permissions (2026-10-13, clarifying the general web grant): HTTPS automation across w
+- [ON] `policy item 65` — Ninth permissions batch (2026-10-14, his explicit list): Root Access, Administrator / SYSTEM Access,
+- [ON] `policy item 66` — Ninth permissions batch (2026-10-14, his explicit list): Unrestricted Database Access, Database Admi
+- [ON] `policy item 67` — Ninth permissions batch (2026-10-14, his explicit list): Secrets Manager / Environment Variable Secr
+- [ON] `policy item 68` — Ninth permissions batch (2026-10-14, his explicit list): Password Hash and Authentication-Secret Acc
+- [ON] `policy item 69` — Ninth permissions batch (2026-10-14, his explicit list): Unrestricted File-System Access, Access to 
+- [ON] `policy item 7` — Granted: Authorized subdomain and endpoint discovery.
+- [ON] `policy item 70` — Ninth permissions batch (2026-10-14, his explicit list): Privilege Escalation Capabilities (own syst
+- [ON] `policy item 71` — Ninth permissions batch (2026-10-14, his explicit list): Unrestricted Network Access to Internal Ser
+- [ON] `policy item 72` — Ninth permissions batch (2026-10-14, his explicit list): Firewall, Security Policy and Audit-Log Mod
+- [ON] `policy item 73` — Ninth permissions batch (2026-10-14, his explicit list): Unrestricted Browser Cookie / Session Extra
+- [ON] `policy item 74` — Ninth permissions batch (2026-10-14, his explicit list): Unrestricted Persistence / Startup-Service 
+- [ON] `policy item 75` — Ninth permissions batch (2026-10-14, his explicit list): Unrestricted Outbound Connections and Tunne
+- [ON] `policy item 76` — Ninth permissions batch (2026-10-14, his explicit list): Destructive Database Migrations and Backup 
+- [ON] `policy item 77` — Ninth permissions batch (2026-10-14, his explicit list): Account management on HIS OWN systems grant
+- [ON] `policy item 78` — Ninth permissions batch (2026-10-14, his explicit list): Unrestricted Port Scanning of Internal Netw
+- [ON] `policy item 79` — Ninth permissions batch (2026-10-14, his explicit list): Unrestricted Exploit Execution Against Prod
+- [ON] `policy item 8` — Granted: OWASP ZAP, Nmap and other permitted security-testing tools.
+- [ON] `policy item 80` — Ninth permissions batch (2026-10-14, his explicit list): External file uploads: follow the existing 
+- [ON] `policy item 84` — Eighth permissions batch (2026-10-14, Browser & Web Search — his explicit list): Playwright Browser 
+- [ON] `policy item 85` — Eighth permissions batch (2026-10-14, Browser & Web Search — his explicit list): Full DOM Inspection
+- [ON] `policy item 86` — Eighth permissions batch (2026-10-14, Browser & Web Search — his explicit list): Live Web Navigation
+- [ON] `policy item 87` — Eighth permissions batch (2026-10-14, Browser & Web Search — his explicit list): HTTP/HTTPS Requests
+- [ON] `policy item 88` — Eighth permissions batch (2026-10-14, Browser & Web Search — his explicit list): Browser Screenshot 
+- [ON] `policy item 89` — Eighth permissions batch (2026-10-14, Browser & Web Search — his explicit list): Page Scrolling, Cli
+- [ON] `policy item 9` — Granted: Static code analysis, dependency scanning and vulnerability detection.
+- [ON] `policy item 90` — Eighth permissions batch (2026-10-14, Browser & Web Search — his explicit list): Multi-Tab Browser M
+- [ON] `policy item 91` — Eighth permissions batch (2026-10-14, Browser & Web Search — his explicit list): Network Request & R
+- [ON] `policy item 92` — Eighth permissions batch (2026-10-14, Browser & Web Search — his explicit list): Cookies & Session M
+- [ON] `policy item 93` — Eighth permissions batch (2026-10-14, Browser & Web Search — his explicit list): File Download & Upl
+- [ON] `policy item 94` — Eighth permissions batch (2026-10-14, Browser & Web Search — his explicit list): Browser Automation 
+- [ON] `policy item 95` — Eighth permissions batch (2026-10-14, Browser & Web Search — his explicit list): Search Result Extra
+- [ON] `policy item 96` — Eighth permissions batch (2026-10-14, Browser & Web Search — his explicit list): Browser-to-LLM Tool
+- [ON] `policy item 97` — Eighth permissions batch (2026-10-14, Browser & Web Search — his explicit list): Automatic Page Veri
+- [ON] `policy item 98` — Seventh permissions batch (2026-10-14, his explicit list — toggle + privilege names): INFRA_ALLOW_PR
+- [ON] `policy item 99` — Seventh permissions batch (2026-10-14, his explicit list — toggle + privilege names): BROWSER_ALLOW_
+
+## safety (2/2 ON)
+
+- [ON] `Audit logging` — Security-relevant actions are audit-logged. Toggle, default ON.
+- [ON] `Destructive-action confirmation` — Destructive tools require confirm=true. Toggle, default ON (ahsan 2026-10-15).
+
+## tool:computer (273/273 ON)
+
+- [ON] `a11y_check` — Heuristic accessibility checks on HTML
+- [ON] `agent_message` — send|recv|list on the file-backed agent bus
+- [ON] `alert_emit` — POST an alert to a webhook URL
+- [ON] `alloc_track` — Allocation traceback sites for a snippet
+- [ON] `api_request` — HTTP request via urllib, JSON-aware
+- [ON] `api_scaffold` — Scaffold REST endpoint handlers from a route list
+- [ON] `api_test` — Run HTTP API test cases against a base URL
+- [ON] `app_close` — Terminate processes by name via pkill (requires confirm)
+- [ON] `app_focus` — Focus a window by name (wmctrl; headless -> not supported)
+- [ON] `app_install` — Install a package via apt (sudo) or pip
+- [ON] `app_launch` — Launch a program detached, return its pid
+- [ON] `app_list` — Snapshot of running processes (pid, name, cpu, mem)
+- [ON] `app_uninstall` — Uninstall a package (requires confirm)
+- [ON] `app_update` — Upgrade a package via apt or pip
+- [ON] `app_windows` — List open windows (wmctrl; headless -> not supported)
+- [ON] `approval_request` — Log an approval request (ApprovalLog + approvals.jsonl for dashboard)
+- [ON] `arch_analyze` — Module dependency graph for a repo
+- [ON] `audit_log` — Record a security event (secrets auto-redacted)
+- [ON] `auth_test` — Probe an endpoint with no-auth and bad-token
+- [ON] `backup_create` — Create a tar.gz backup of workspace paths
+- [ON] `backup_verify` — Validate tar/zip backup integrity
+- [ON] `benchmark_run` — Run a registered tool N times; report min/max/mean timings
+- [ON] `branch_create` — git checkout -b for a patch proposal
+- [ON] `branch_if` — Run condition tool; truthy ok/output -> then branch, else else branch
+- [ON] `browser_back` — Go back in the active tab's history
+- [ON] `browser_click` — Click a selector in a tab
+- [ON] `browser_close` — Stop the managed browser daemon gracefully
+- [ON] `browser_close_tab` — Close a tab
+- [ON] `browser_console` — Read captured console messages (daemon log)
+- [ON] `browser_cookies` — Get/set/clear cookies (clear needs confirm)
+- [ON] `browser_download` — Download a URL to a file (refuses overwrite without confirm)
+- [ON] `browser_fill` — Fill an input/textarea
+- [ON] `browser_form_submit` — Submit the form containing a selector
+- [ON] `browser_forward` — Go forward in the active tab's history
+- [ON] `browser_js` — Evaluate JavaScript in a tab; return JSON-serializable result
+- [ON] `browser_launch` — Start the managed Playwright browser daemon (idempotent)
+- [ON] `browser_network` — Read captured network requests (daemon log)
+- [ON] `browser_new_tab` — Open a new persistent tab (optional URL)
+- [ON] `browser_proxy` — Set proxy for new contexts (stored config; new tabs only)
+- [ON] `browser_refresh` — Reload the active tab
+- [ON] `browser_scroll` — Scroll page or element (up|down|left|right|top|bottom)
+- [ON] `browser_select` — Select a dropdown option
+- [ON] `browser_storage` — Get/set/clear local|session storage (clear needs confirm)
+- [ON] `browser_switch_tab` — Make a tab the active tab
+- [ON] `browser_tab_html` — Get a tab's full HTML
+- [ON] `browser_tab_list` — List all persistent tabs
+- [ON] `browser_tab_screenshot` — Screenshot a tab to PNG
+- [ON] `browser_tab_text` — Get a tab's visible text
+- [ON] `browser_ua` — Set user-agent for new contexts (stored config)
+- [ON] `browser_upload` — Set files on a file input
+- [ON] `browser_viewport` — Set the active tab's viewport size
+- [ON] `browser_wait` — Wait for a selector or a fixed timeout
+- [ON] `bug_scan` — Static bug scan: syntax, risky patterns, unused imports (+pyflakes)
+- [ON] `build_log_collect` — Collect build.log files under a root
+- [ON] `build_run` — Detect build system and run the build (log to build.log)
+- [ON] `cache_perf_note` — Run snippet; report lru_cache stats if present
+- [ON] `checkpoint_create` — Tar.gz snapshot of a workspace dir
+- [ON] `checkpoint_restore` — Restore a checkpoint (confirm='RESTORE')
+- [ON] `cicd_run` — Validate CI workflows; run with `act` if installed
+- [ON] `clipboard_copy` — Copy text to the OS clipboard
+- [ON] `clipboard_paste` — Paste clipboard content via ctrl+v
+- [ON] `cloud_note` — Guidance: cloud provider actions need connected credentials
+- [ON] `code_complete` — Heuristic AST-based code completions for a file position
+- [ON] `code_format` — Format with black (fails with hint if missing)
+- [ON] `code_generate` — Render a code scaffold template (script/class/test/cli), syntax-check, write file
+- [ON] `code_lint` — py_compile + ast.parse; pyflakes if installed
+- [ON] `code_refactor` — rename symbol across files | extract lines into function
+- [ON] `code_review` — Static review: syntax, bare excepts, TODOs, complexity
+- [ON] `code_translate` — Rule-based python->javascript translation (honest scope)
+- [ON] `compiler_run` — Compile a file with gcc/g++/javac/rustc
+- [ON] `complexity_estimate` — Heuristic Big-O from loop nesting via ast
+- [ON] `concurrency_note` — Guidance for concurrency analysis
+- [ON] `config_audit` — Find debug flags, weak creds, open perms in configs
+- [ON] `config_version` — snapshot|list|restore versioned configs
+- [ON] `confirm_prompt` — Return a non-interactive confirmation question payload (dashboard confirms)
+- [ON] `container_note` — Dockerfile presence check; builds out of scope by design
+- [ON] `coverage_run` — coverage.py run + report (fails with hint if missing)
+- [ON] `cred_protect` — Scan text for secrets (keys/tokens/passwords); return redacted text + findings
+- [ON] `cron_add` — Append a validated 5-field entry to the user crontab
+- [ON] `cross_browser_note` — Honest cross-browser validation guidance
+- [ON] `dast_note` — Guidance for dynamic testing
+- [ON] `dataset_process` — Load .csv/.jsonl (capped), optional JSON dump
+- [ON] `dataset_validate` — Row-level schema checks on .csv/.jsonl
+- [ON] `db_migrate_test` — Dry-run SQL migrations on throwaway sqlite
+- [ON] `db_query_profile` — EXPLAIN QUERY PLAN + timing for sqlite queries
+- [ON] `db_schema_generate` — Generate CREATE TABLE DDL from field specs
+- [ON] `db_test` — Run SQL statements against throwaway sqlite
+- [ON] `deadlock_detect` — Sample this process threads via faulthandler
+- [ON] `debugger_run` — Scripted non-interactive pdb run
+- [ON] `dep_check` — Check a package: importable, version, location
+- [ON] `dep_conflicts` — pip check for dependency conflicts
+- [ON] `deploy_preview` — Optional build, then serve locally and smoke-test
+- [ON] `dialog_handle` — Best-effort dialog interaction: confirm|cancel|fill on focused window
+- [ON] `dir_create` — Create a directory (parents as needed)
+- [ON] `dir_list` — Flat listing of a directory with sizes
+- [ON] `dlp_check` — Scan files for SSN/card/email/secret patterns
+- [ON] `docs_generate` — Generate markdown docs from docstrings via ast
+- [ON] `e2e_note` — Guidance for scripting end-to-end tests
+- [ON] `editor_control` — Open a file at a line (VS Code CLI, $EDITOR, or xdg-open)
+- [ON] `embed_generate` — Hashed BOW pseudo-embeddings (labeled non-semantic)
+- [ON] `env_detect` — Detect OS, python, and dev tools on PATH
+- [ON] `env_get` — Read an env var (secrets masked in output)
+- [ON] `env_set` — Set an env var for THIS process only (documented)
+- [ON] `error_detect` — Scan the audit log for recent errors; structured findings
+- [ON] `error_log_read` — Tail agent/logs/* with level filter and keyword search
+- [ON] `eval_dataset_gen` — Write eval JSONL stubs
+- [ON] `event_emit` — Log an event to events.jsonl (+ best-effort event-bus publish)
+- [ON] `fail_repro` — Reproduce a failure from a code snippet
+- [ON] `failure_memory` — add|search persistent failure->fix records
+- [ON] `file_access_rules` — Manage file access rules (JSON); default allow all paths
+- [ON] `file_append` — Append text content to a file (creates parent dirs)
+- [ON] `file_chmod` — Change file mode (octal string like '644' or int)
+- [ON] `file_copy` — Copy a file preserving metadata
+- [ON] `file_delete` — Move a file/dir to trash (requires confirm=True)
+- [ON] `file_lock` — Advisory exclusive file lock via fcntl (lock|unlock)
+- [ON] `file_metadata` — stat metadata: size, mtime, mode, owner/group
+- [ON] `file_move` — Move/rename a file or directory
+- [ON] `file_preview` — Preview file head: first N text lines, or hex head for binaries
+- [ON] `file_rename` — Rename within same directory
+- [ON] `file_watch` — Poll mtime/hash up to timeout_sec, report change events
+- [ON] `finetune_note` — Fine-tuning readiness (honest)
+- [ON] `firewall_note` — Security-tooling status note (never disables protections)
+- [ON] `fix_verify` — Run pytest to verify a fix
+- [ON] `fuzz_run` — Random-input fuzzing of a python function
+- [ON] `game_build` — Detect engine CLIs; headless Godot export when available
+- [ON] `game_scaffold` — Scaffold a runnable starter game (pygame|godot|unity|unreal, 2d|3d)
+- [ON] `gap_analyze` — Compare requested capabilities vs the registry
+- [ON] `git_clone` — Clone a repo (no credential URLs accepted)
+- [ON] `git_pull` — git pull in a repo dir
+- [ON] `git_push` — git push to remote/branch (uses host-configured auth)
+- [ON] `gpu_monitor` — nvidia-smi GPU stats or honest absent-note
+- [ON] `gpu_profile_note` — nvidia-smi stats if GPU present, else honest note
+- [ON] `health_check` — python version, disk free, registry import, permission-manager presence
+- [ON] `iac_validate` — terraform validate/fmt or heuristic check
+- [ON] `iam_note` — Report connected cloud IAM credentials (read-only)
+- [ON] `improve_hypothesis` — Heuristic improvement ideas for an area
+- [ON] `infer_opt_note` — Inference optimization guidance
+- [ON] `input_fuzz` — Send malformed inputs to a URL; count 5xx (authorized only)
+- [ON] `input_method_switch` — Switch keyboard layout via setxkbmap (best-effort)
+- [ON] `k8s_validate` — Kubernetes manifest schema sanity checks
+- [ON] `kb_update` — Append to the local knowledge base
+- [ON] `key_combo` — Press a combo string like 'ctrl+shift+t'
+- [ON] `key_hold` — Hold a key down for N seconds
+- [ON] `key_hotkey` — Press keys together
+- [ON] `key_macro` — Play back a key sequence
+- [ON] `key_press` — Press a single key
+- [ON] `key_special` — Press a special key
+- [ON] `key_type` — Type text (unicode-safe)
+- [ON] `layout_detect` — Detect current keyboard layout/locale (best-effort)
+- [ON] `license_check` — Inventory dependency licenses; flag copyleft
+- [ON] `live_screen_stream` — Start MJPEG HTTP stream of screenshots; stop with stream_stop
+- [ON] `load_test` — Concurrent HTTP load test with latency stats
+- [ON] `log_analyze` — Bucket error lines in a log file
+- [ON] `loop_repeat` — Repeat a tool call N times (iteration injected into args)
+- [ON] `lora_note` — peft/LoRA availability report
+- [ON] `macro_append` — Append a {tool, args} step to a macro
+- [ON] `macro_record` — Start recording a named macro (list of tool calls)
+- [ON] `macro_replay` — Replay a macro via the bound executor
+- [ON] `memleak_detect` — tracemalloc growth check over repeated exec of code
+- [ON] `memory_delete` — Delete a memory entry (requires confirm)
+- [ON] `memory_get` — Fetch a single memory entry
+- [ON] `memory_save` — Save a key/value in a namespace (Supabase if configured, else local JSONL)
+- [ON] `memory_search` — Substring search over stored memory entries
+- [ON] `menu_navigate` — Keyboard-driven menu navigation (Alt accelerators + arrow keys)
+- [ON] `ml_inference` — Call the configured model endpoint (HALEY_API_URL)
+- [ON] `model_route` — Heuristic routing of a task to code/chat/embed path
+- [ON] `model_version` — list|get|set pinned model versions
+- [ON] `mouse_click` — Click at (x, y)
+- [ON] `mouse_double_click` — Double-click at (x, y)
+- [ON] `mouse_drag` — Drag from (x1,y1) to (x2,y2)
+- [ON] `mouse_hold_release` — Press and hold left button at (x,y) for hold_sec
+- [ON] `mouse_hover` — Move the cursor to (x, y) without clicking
+- [ON] `mouse_move` — Move the mouse cursor to (x, y)
+- [ON] `mouse_right_click` — Right-click at (x, y)
+- [ON] `mouse_scroll` — Scroll the wheel N clicks (positive = up)
+- [ON] `multi_file_edit` — Regex replace across files (dry-run default)
+- [ON] `multi_file_fix` — Append a patch comment to all files matching a pattern
+- [ON] `multi_monitor_info` — List detected monitors (screeninfo/xrandr/mss); honest headless note
+- [ON] `net_latency` — Measure HTTP latency samples
+- [ON] `ocr_read` — OCR text from image_path (pytesseract); url enables Playwright page-text fallback
+- [ON] `op_timeout` — Execute a registered tool with a hard timeout
+- [ON] `optimize_suggest` — Heuristic optimization suggestions for a file
+- [ON] `optimize_verify` — Before/after benchmark of two snippets
+- [ON] `package_build` — Build a zipapp executable from a dir with __main__.py
+- [ON] `parallel_run` — Run tool calls concurrently via ThreadPoolExecutor
+- [ON] `patch_generate` — Template fix proposals for common errors (apply needs target)
+- [ON] `perf_regression` — Compare snippet median vs baseline_ms
+- [ON] `perm_audit` — Read-only audit of PermissionManager state
+- [ON] `perm_change_log` — Append/query permission grant/revoke change history
+- [ON] `perm_check` — Check a permission's state (denials always report locked)
+- [ON] `perm_grant` — Grant a permission (REFUSES the 5 locked denials)
+- [ON] `perm_revoke` — Revoke a permission
+- [ON] `process_kill` — Kill a process by pid (requires confirm)
+- [ON] `process_nice` — Set process niceness (-20..19)
+- [ON] `prod_deploy` — Run deploy steps; requires confirm='DEPLOY', stops on failure
+- [ON] `prod_secret_read` — Read env/file secret (audit-logged; value never printed)
+- [ON] `profile_cpu` — cProfile a snippet; hotspot report
+- [ON] `profile_memory` — tracemalloc memory profile of a snippet
+- [ON] `progress_report` — Create/update/query named task-progress entries (persisted)
+- [ON] `prompt_eval` — Heuristic prompt rubric (5 checks)
+- [ON] `property_test` — hypothesis property test (fails with hint if missing)
+- [ON] `quality_score` — Surface text-quality heuristics
+- [ON] `quantize_note` — bitsandbytes availability report
+- [ON] `race_note` — Honest guidance for race-condition hunting
+- [ON] `rag_index` — Build a TF-IDF index over docs (honest, no fake vectors)
+- [ON] `rag_query` — Cosine TF-IDF search over a built index
+- [ON] `rate_limit_handle` — Advisory token-bucket slot grant
+- [ON] `rate_limit_status` — Token-bucket status (file if present, else defaults)
+- [ON] `regression_check` — Record pytest baseline for later diffing
+- [ON] `release_deploy` — Tag a release (confirm='RELEASE')
+- [ON] `release_notes` — Generate release notes from git log
+- [ON] `render_perf_note` — Guidance for renderer performance analysis
+- [ON] `repo_scaffold` — Scaffold multi-file project (web|cli|api|saas|lib|plugin|desktop)
+- [ON] `repo_understand` — Index symbols + import graph across a repo
+- [ON] `repro_build` — SHA-256 over a tree for reproducibility evidence
+- [ON] `resource_monitor` — CPU/RAM/disk via psutil or /proc
+- [ON] `restore_point` — Labeled backup into agent/logs/restore_points/
+- [ON] `retry_backoff` — Retry a tool with exponential backoff
+- [ON] `root_cause` — Heuristic root-cause from traceback or log
+- [ON] `root_exec` — sudo -n passthrough (audit-logged; non-interactive only)
+- [ON] `runtime_check` — Run a python snippet, analyze any traceback
+- [ON] `safe_mode` — Master safe-mode switch; can never disable the 5 denials
+- [ON] `sast_scan` — bandit if installed, else pattern-based SAST
+- [ON] `sched_add` — Add/update a persistent interval schedule entry
+- [ON] `sched_run_due` — Advance due schedule entries; RETURN the due list for the dispatcher to execute
+- [ON] `screen_annotate` — Draw boxes+labels on an image copy (needs PIL)
+- [ON] `screen_change_detect` — Two screenshots interval apart; changed-region boxes + sha256 diff
+- [ON] `screen_record` — Record screen (ffmpeg x11grab) or page (Playwright video)
+- [ON] `screen_region_capture` — Capture a screen region {x,y,width,height} to PNG
+- [ON] `screen_shot` — Capture the full screen to PNG (mss/CLI, else headless page render)
+- [ON] `screenshot_analyze` — Screenshot + OCR + UI element list, combined
+- [ON] `sdk_scaffold` — Scaffold a urllib client SDK from endpoints
+- [ON] `sec_regression` — Re-run SAST + dep scan; count open findings
+- [ON] `self_perm_audit` — Read-only report of what the agent may change about its permissions
+- [ON] `service_control` — systemctl start|stop|restart|status (best-effort)
+- [ON] `session_info` — Current session: pid, uptime, python, cwd, env
+- [ON] `ssh_exec` — SSH remote command via existing keys/config (BatchMode)
+- [ON] `stacktrace_analyze` — Parse a traceback: frames + likely causes
+- [ON] `staging_note` — Guidance: staging via deploy_preview + uptime_check
+- [ON] `stream_stop` — Stop an MJPEG stream started by live_screen_stream
+- [ON] `stress_test` — Heavier load test (up to 2000 req)
+- [ON] `supply_chain_check` — Pinning + lockfile hygiene for requirements
+- [ON] `task_decompose` — Split a goal into subtasks of tool-call steps
+- [ON] `task_monitor` — Check whether a pid is alive (+rss/utime)
+- [ON] `task_plan` — Heuristic plan: goal -> ordered steps (some mapped to tools)
+- [ON] `test_failure_diagnose` — Run pytest, list failures + traceback hints
+- [ON] `test_generate` — Generate pytest smoke scaffolds from a module's functions
+- [ON] `test_run` — Run pytest on a target (markers supported)
+- [ON] `text_select_all` — Select all (ctrl+a)
+- [ON] `thread_analyze` — Dump live threads of this process
+- [ON] `tool_discover` — Search the live tool registry
+- [ON] `tool_spec_gen` — Generate a tool spec (schema + handler skeleton)
+- [ON] `tool_test` — Run a named tool's handler with sample args
+- [ON] `tool_test_gen` — Generate a pytest smoke scaffold for a tool
+- [ON] `tool_version` — Get/set/list sidecar versions for registry tools
+- [ON] `touch_gesture` — Touch gesture via CDP: tap|swipe (pinch unsupported on desktop)
+- [ON] `trash_restore` — Restore a file from ~/.trash (name or original filename; dest optional)
+- [ON] `tunnel_create` — Public tunnel via cloudflared/ngrok/ssh (if installed)
+- [ON] `type_check` — mypy if installed, else annotation-coverage report
+- [ON] `ui_element_detect` — List interactive elements from a page accessibility tree
+- [ON] `ui_state_capture` — Raw accessibility snapshot JSON of a page
+- [ON] `ui_test` — Fetch a page, run basic UI checks
+- [ON] `unicode_type` — Unicode-safe typing (prefers Playwright keyboard.type)
+- [ON] `uptime_check` — HTTP up/down checks for URLs
+- [ON] `vector_search` — Cosine search over caller-supplied vectors
+- [ON] `visual_grounding` — Locate an element by description; return center {x,y}
+- [ON] `visual_verify` — Pixel-diff two images; report identical + diff ratio
+- [ON] `vuln_scan_deps` — pip-audit if installed, else package inventory
+- [ON] `webhook_register` — Scaffold a webhook handler file (manual wiring needed)
+- [ON] `website_allowlist` — Manage website allowlist (YAML); empty = allow all
+- [ON] `window_resize_move` — Resize/move an OS window (wmctrl/xdotool); honest headless note
+- [ON] `work_queue` — Persistent FIFO: push|pop|list|clear tool-call tasks
+- [ON] `workflow_run` — Run steps sequentially; stop on first failure unless continue_on_error
+
+## tool:workspace (41/41 ON)
+
+- [ON] `archive_create` — Create zip/tar archives
+- [ON] `archive_extract` — Extract an archive
+- [ON] `archive_info` — Get archive metadata
+- [ON] `archive_list` — List archive contents
+- [ON] `audio_info` — Get audio file metadata
+- [ON] `browser_extract` — Extract page content
+- [ON] `browser_navigate` — Navigate browser
+- [ON] `browser_screenshot` — Screenshot page
+- [ON] `csv_stats` — Column stats for CSV (from text or path)
+- [ON] `disk_usage` — Filesystem usage for a path
+- [ON] `file_checksum` — Hash a file (sha256/sha1/md5/blake2b)
+- [ON] `file_find` — Find files by glob, optionally by content regex
+- [ON] `file_read` — Read file
+- [ON] `file_tree` — Recursive directory tree with filters
+- [ON] `file_write` — Write file
+- [ON] `germany_fetch` — HTTP via Germany
+- [ON] `git_branch` — List/create/delete/checkout git branches
+- [ON] `git_commit` — Stage (optional) and create a git commit
+- [ON] `git_diff` — Git diff with per-file stats
+- [ON] `git_log` — Git log with parsed commits
+- [ON] `git_status` — Git working-tree status (parsed)
+- [ON] `gzip_compress` — Compress file with gzip
+- [ON] `gzip_decompress` — Decompress gzip file
+- [ON] `image_convert` — Convert image to different format
+- [ON] `image_info` — Get image metadata (dimensions, format, size)
+- [ON] `image_resize` — Resize an image to specified dimensions
+- [ON] `image_thumbnail` — Create a thumbnail of an image
+- [ON] `json_validate` — Parse JSON and validate against a schema
+- [ON] `pip` — Install pip package
+- [ON] `python` — Execute Python code
+- [ON] `self_modify` — Propose code patch
+- [ON] `shell` — Execute bash command
+- [ON] `supabase_query` — Supabase SQL
+- [ON] `sysinfo` — Host snapshot: OS, Python, CPU, memory
+- [ON] `text_diff` — Show diff between two texts
+- [ON] `text_replace` — Find and replace in a file
+- [ON] `text_search` — Search text in files (grep-like)
+- [ON] `text_stats` — Word/line/character statistics
+- [ON] `tool_create` — Create new tool
+- [ON] `video_info` — Get video file metadata
+- [ON] `web_search` — Public web search
+
+## tool:network (4/4 ON)
+
+- [ON] `dns_lookup` — Resolve hostname to A/AAAA addresses
+- [ON] `http_get` — HTTP GET with headers/timeout/redirect handling
+- [ON] `http_post` — HTTP POST with JSON or form body
+- [ON] `port_check` — TCP port reachability check
+
