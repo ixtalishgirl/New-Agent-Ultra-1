@@ -42,6 +42,15 @@ def test_has_browser_true_with_full_chromium(fake_home):
     assert eb.has_browser() is True
 
 
+def test_has_browser_true_with_new_headless_shell_layout(fake_home):
+    # Playwright >=1.49: chrome-headless-shell-linux64/chrome-headless-shell
+    exe_dir = (fake_home / "chromium_headless_shell-1248"
+               / "chrome-headless-shell-linux64")
+    exe_dir.mkdir(parents=True)
+    (exe_dir / "chrome-headless-shell").write_text("fake")
+    assert eb.has_browser() is True
+
+
 def test_ensure_installs_when_missing(fake_home, monkeypatch):
     calls = []
 

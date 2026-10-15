@@ -39,10 +39,15 @@ def has_browser() -> bool:
     for child in children:
         name = child.name
         if name.startswith("chromium_headless_shell-"):
-            if (child / "chrome-linux" / "headless_shell").exists():
+            # Playwright >=1.49: chrome-headless-shell-linux64/chrome-headless-shell
+            # Older: chrome-linux/headless_shell
+            if ((child / "chrome-linux" / "headless_shell").exists()
+                    or (child / "chrome-headless-shell-linux64"
+                        / "chrome-headless-shell").exists()):
                 return True
         elif name.startswith("chromium-"):
-            if (child / "chrome-linux" / "chrome").exists():
+            if ((child / "chrome-linux" / "chrome").exists()
+                    or (child / "chrome-linux64" / "chrome").exists()):
                 return True
     return False
 
