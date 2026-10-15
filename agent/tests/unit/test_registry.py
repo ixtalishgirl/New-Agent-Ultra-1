@@ -22,6 +22,11 @@ EXPECTED = [
     # Media tools
     "image_info", "image_resize", "image_convert", "image_thumbnail",
     "audio_info", "video_info",
+    # Archive tools
+    "archive_create", "archive_extract", "archive_list", "archive_info",
+    "gzip_compress", "gzip_decompress",
+    # Text tools
+    "text_search", "text_replace", "text_stats", "text_diff",
 ]
 
 

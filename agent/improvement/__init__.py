@@ -18,6 +18,10 @@ from .approval_manager import (
     ApprovalManager, ApprovalRequest, ApprovalStatus, ChangeRisk,
 )
 from .rollback import RollbackManager, Snapshot, RollbackResult, RollbackStrategy
+from .self_modifier import (
+    SelfModifier, CodePatch, PatchStatus, PatchType,
+    Baseline, GitHelper, PatchApplier, TestRunner, BenchmarkRunner,
+)
 
 __all__ = [
     "ImprovementPlanner", "Observation", "Opportunity",
@@ -28,4 +32,7 @@ __all__ = [
     "build_standard_suite",
     "ApprovalManager", "ApprovalRequest", "ApprovalStatus", "ChangeRisk",
     "RollbackManager", "Snapshot", "RollbackResult", "RollbackStrategy",
+    "SelfModifier", "CodePatch", "PatchStatus", "PatchType",
+    "Baseline", "GitHelper", "PatchApplier", "TestRunner",
+    "BenchmarkRunner",
 ]

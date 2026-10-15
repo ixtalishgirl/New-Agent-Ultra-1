@@ -12,6 +12,8 @@ from .network_tools import NetworkTools
 from .data_tools import DataTools
 from .system_tools import SystemTools
 from . import media_tools
+from . import archive_tools
+from . import text_tools
 
 
 @dataclass
@@ -94,6 +96,67 @@ class Dispatcher:
             return DispatchResult(ok=ok, output=_json.dumps(result, indent=2, default=str))
         except Exception as e:
             return DispatchResult(ok=False, output=f"Media tool error: {e}")
+
+    def _archive(self, name: str, args: dict) -> "DispatchResult":
+        """Dispatch archive tool calls."""
+        import json as _json
+        try:
+            if name == "archive_create":
+                result = archive_tools.archive_create(
+                    args.get("paths", []), args.get("output", ""),
+                    args.get("format", "zip"))
+            elif name == "archive_extract":
+                result = archive_tools.archive_extract(
+                    args.get("archive", ""), args.get("dest"))
+            elif name == "archive_list":
+                result = archive_tools.archive_list(
+                    args.get("archive", ""))
+            elif name == "archive_info":
+                result = archive_tools.archive_info(
+                    args.get("archive", ""))
+            elif name == "gzip_compress":
+                result = archive_tools.gzip_compress(
+                    args.get("path", ""), args.get("output"))
+            elif name == "gzip_decompress":
+                result = archive_tools.gzip_decompress(
+                    args.get("path", ""), args.get("output"))
+            else:
+                return DispatchResult(ok=False,
+                                      output=f"Unknown archive tool: {name}")
+            ok = result.get("ok", True)
+            return DispatchResult(
+                ok=ok, output=_json.dumps(result, indent=2, default=str))
+        except Exception as e:
+            return DispatchResult(ok=False,
+                                  output=f"Archive tool error: {e}")
+
+    def _text(self, name: str, args: dict) -> "DispatchResult":
+        """Dispatch text tool calls."""
+        import json as _json
+        try:
+            if name == "text_search":
+                result = text_tools.text_search(
+                    args.get("pattern", ""), args.get("path", ""),
+                    args.get("regex", False),
+                    args.get("case_sensitive", True))
+            elif name == "text_replace":
+                result = text_tools.text_replace(
+                    args.get("path", ""), args.get("old", ""),
+                    args.get("new", ""), args.get("regex", False))
+            elif name == "text_stats":
+                result = text_tools.text_stats(args.get("path", ""))
+            elif name == "text_diff":
+                result = text_tools.text_diff(
+                    args.get("text1", ""), args.get("text2", ""))
+            else:
+                return DispatchResult(ok=False,
+                                      output=f"Unknown text tool: {name}")
+            ok = result.get("ok", True)
+            return DispatchResult(
+                ok=ok, output=_json.dumps(result, indent=2, default=str))
+        except Exception as e:
+            return DispatchResult(ok=False,
+                                  output=f"Text tool error: {e}")
 
     @staticmethod
     def _wrap(result) -> "DispatchResult":
@@ -224,6 +287,13 @@ class Dispatcher:
         elif name in ("image_info", "image_resize", "image_convert",
                       "image_thumbnail", "audio_info", "video_info"):
             return self._media(name, args)
+        elif name in ("archive_create", "archive_extract",
+                      "archive_list", "archive_info",
+                      "gzip_compress", "gzip_decompress"):
+            return self._archive(name, args)
+        elif name in ("text_search", "text_replace", "text_stats",
+                      "text_diff"):
+            return self._text(name, args)
         else:
             return DispatchResult(
                 ok=False,

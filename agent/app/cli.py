@@ -200,17 +200,19 @@ def cmd_improve(args) -> int:
     from agent.improvement import ImprovementPlanner
     planner = ImprovementPlanner()
     print("→ Observing system...")
-    observations = planner.observe()
+    observations = planner.auto_observe()
     print(f"→ {len(observations)} observations")
     for obs in observations[:5]:
-        print(f"  - {obs.get('description', obs)[:100]}")
+        print(f"  - {obs.description[:100]}")
 
     if args.auto:
-        print("\n→ Generating improvements...")
-        improvements = planner.plan_improvements(observations)
-        print(f"→ {len(improvements)} improvement candidates")
-        for imp in improvements[:3]:
-            print(f"  - {imp.get('title', imp)[:100]}")
+        print("\n→ Identifying opportunities...")
+        opportunities = planner.identify()
+        print(f"→ {len(opportunities)} opportunities")
+        for opp in opportunities[:5]:
+            print(f"  - [{opp.type.value}] {opp.title[:80]}")
+            hyp = planner.auto_hypothesize(opp)
+            print(f"    Hypothesis: {hyp.statement[:100]}")
     return 0
 
 

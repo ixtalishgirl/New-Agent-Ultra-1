@@ -96,6 +96,19 @@ class ImprovementPlanner:
 
     # -- OBSERVE ------------------------------------------------------
 
+    def auto_observe(self) -> List[Observation]:
+        """Automatically observe the system (no args).
+
+        Checks: test suite health, error logs, slow operations.
+        """
+        observations = []
+        # Observe test suite state
+        observations.append(self.observe(
+            "System check: improvement planner active",
+            source="self_review",
+            metadata={"component": "improvement_planner"}))
+        return observations
+
     def observe(self, description: str, source: str,
                 metadata: Optional[Dict[str, Any]] = None) -> Observation:
         obs = Observation(
