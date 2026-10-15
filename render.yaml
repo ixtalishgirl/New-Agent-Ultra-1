@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: haley-agent
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python3 -m agent.api.server
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: HALEY_API_URL
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_DB_URL
+        sync: false
+      - key: GERMANY_PROXY_URL
+        sync: false

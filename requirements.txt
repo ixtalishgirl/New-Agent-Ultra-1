@@ -1,0 +1,4 @@
+# Haley agent — stdlib only. No third-party runtime dependencies.
+# Optional (install only if needed for full powers):
+# playwright      # real Chromium automation (browser tools)
+# requests        # used only if stdlib urllib is insufficient
