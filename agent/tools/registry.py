@@ -91,6 +91,7 @@ _COMPUTER_CONTROL_MODULES = [
     "agent.tools.self_tools",      # Self-Improvement & Tool Creation
     "agent.tools.supabase_tools",  # Supabase / Postgres executor
     "agent.tools.firestore_tools",  # Firestore (primary memory/data store)
+    "agent.tools.turso_tools",  # Turso cloud SQLite (full SQL over HTTPS)
     "agent.tools.replicate_tools",  # Self-replication (child agents)
     "agent.tools.selfmod_tools",  # Self-modification (verified)
 ]

@@ -269,18 +269,17 @@ def restore_from_supabase() -> int:
 
 
 def ensure_restored() -> int:
-    """Restore from Firestore (primary), then Supabase, when local is empty.
-    Never raises."""
-    try:
-        n = restore_from_firestore()
-        if n:
-            return n
-    except Exception:
-        pass
-    try:
-        return restore_from_supabase()
-    except Exception:
-        return 0
+    """Restore from Turso, then Firestore, then Supabase, when local is
+    empty. Never raises."""
+    for fn in (restore_from_turso, restore_from_firestore,
+               restore_from_supabase):
+        try:
+            n = fn()
+            if n:
+                return n
+        except Exception:
+            pass
+    return 0
 
 
 # Firestore backup / restore (primary — HTTPS, works from any host)
@@ -351,8 +350,95 @@ def restore_from_firestore() -> int:
 
 def backup_tool(name: str, code: str, schema: dict,
                 description: str) -> tuple[bool, str]:
-    """Best-effort cloud backup: Firestore first, Supabase second."""
-    ok, note = backup_to_firestore(name, code, schema, description)
-    if ok:
-        return ok, note
+    """Best-effort cloud backup: Turso, then Firestore, then Supabase."""
+    for fn in (backup_to_turso, backup_to_firestore):
+        try:
+            ok, note = fn(name, code, schema, description)
+            if ok:
+                return ok, note
+        except Exception:
+            pass
     return backup_to_supabase(name, code, schema, description)
+
+
+# Turso backup / restore (primary — full SQL incl. CREATE TABLE over HTTPS)
+# ---------------------------------------------------------------------------
+
+_TURSO_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS custom_tools (
+  name TEXT PRIMARY KEY,
+  code TEXT NOT NULL,
+  schema_json TEXT,
+  description TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+""".strip()
+
+
+def _turso() -> Any | None:
+    try:
+        from agent.tools import turso_tools as tt
+        return tt
+    except Exception:
+        return None
+
+
+def backup_to_turso(name: str, code: str, schema: dict,
+                    description: str) -> tuple[bool, str]:
+    """Upsert the tool into Turso custom_tools. Best-effort: (ok, note)."""
+    tt = _turso()
+    if tt is None:
+        return False, "turso module unavailable"
+    try:
+        r1 = tt.turso_query({"sql": _TURSO_TABLE_SQL})
+        if not r1.ok:
+            return False, f"backup failed: {r1.error[:200]}"
+        r2 = tt.turso_query({
+            "sql": ("INSERT INTO custom_tools (name, code, schema_json, "
+                    "description) VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(name) DO UPDATE SET code=excluded.code, "
+                    "schema_json=excluded.schema_json, "
+                    "description=excluded.description"),
+            "params": [name, code, json.dumps(schema or {"type": "object"}),
+                       description],
+        })
+    except Exception as e:
+        return False, f"backup failed: {type(e).__name__}"
+    if r2.ok:
+        return True, "backed up to Turso custom_tools"
+    return False, f"backup failed: {r2.error[:200]}"
+
+
+def restore_from_turso() -> int:
+    """If local custom/ is empty, restore tools from Turso. Returns count."""
+    existing = [p for p in CUSTOM_DIR.glob("*.py") if p.name != "__init__.py"]
+    if existing:
+        return 0
+    tt = _turso()
+    if tt is None:
+        return 0
+    try:
+        res = tt.turso_query(
+            {"sql": "SELECT name, code, schema_json, description "
+                    "FROM custom_tools"})
+    except Exception:
+        return 0
+    if not res.ok:
+        return 0
+    rows = res.parsed.get("rows", []) if isinstance(res.parsed, dict) else []
+    count = 0
+    for row in rows:
+        try:
+            name = str(row.get("name", "")).strip()
+            code = str(row.get("code", ""))
+            if not name or not code:
+                continue
+            schema = row.get("schema_json") or {"type": "object"}
+            if isinstance(schema, str):
+                schema = json.loads(schema)
+            save_custom_tool(name, str(row.get("description", "")),
+                             schema, code)
+            count += 1
+        except Exception:
+            continue
+    return count
