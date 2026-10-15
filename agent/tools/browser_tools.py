@@ -2,9 +2,9 @@
 
 Architecture (no live-browser dependency at import time):
   * A persistent daemon (``/tmp/browser_daemon/daemon.py``) launches one
-    headless Chromium with ``launch_persistent_context`` on a fixed
-    user-data-dir, exposes it on a CDP port, and appends console messages
-    and network requests to JSONL logs.
+    headless Chromium with a regular ``launch`` (fresh Browser supporting
+    multiple isolated contexts), exposes it on a CDP port, and appends
+    console messages and network requests to JSONL logs.
   * Each tool runs a small Playwright script in a SUBPROCESS
     (subprocess-isolated, same pattern as agent/browser/playwright_runner.py),
     connects with ``chromium.connect_over_cdp``, performs ONE operation on
@@ -101,16 +101,22 @@ def main():
         sys.exit(1)
     console_log = base / "console.jsonl"
     net_log = base / "network.jsonl"
-    kwargs = {"user_data_dir": str(profile), "headless": True,
-              "args": ["--no-sandbox", f"--remote-debugging-port={port}"]}
+    # NOTE: regular launch (not launch_persistent_context) — the persistent
+    # variant returns a BrowserContext, not a Browser, which broke
+    # browser.contexts / new_context (isolated contexts for replication).
+    # The profile dir is ephemeral on Render anyway.
+    launch_kwargs = {"headless": True,
+                     "args": ["--no-sandbox",
+                              f"--remote-debugging-port={port}"]}
+    ctx_kwargs: dict = {}
     if cfg.get("user_agent"):
-        kwargs["user_agent"] = cfg["user_agent"]
+        ctx_kwargs["user_agent"] = cfg["user_agent"]
     if cfg.get("proxy"):
-        kwargs["proxy"] = cfg["proxy"]
+        ctx_kwargs["proxy"] = cfg["proxy"]
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch_persistent_context(**kwargs)
-            ctx = browser.contexts[0] if browser.contexts else None
+            browser = p.chromium.launch(**launch_kwargs)
+            ctx = browser.new_context(**ctx_kwargs)
             def on_console(msg):
                 try:
                     with open(console_log, "a") as f:
