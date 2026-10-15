@@ -1,0 +1,6 @@
+# Execution resource limits
+python_timeout: 60
+shell_timeout: 60
+max_memory_mb: 1024
+max_iterations: 10
+tool_timeout_default: 60

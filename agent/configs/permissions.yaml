@@ -1,0 +1,12 @@
+# Permission policy summary.
+# Full source of truth: security/policy.py (all 167 items from PERMISSIONS.md).
+# The 5 denials below are HARD-CODED at the execution layer and can NEVER be
+# self-granted. Beyond these 5, NO other restrictions exist (ahsan's order).
+denials:
+  - container_escape   # host shell from inside container / sandbox escape
+  - boot_recovery      # boot/recovery configuration modification
+  - av_edr_disable     # antivirus/EDR disabling
+  - billing_fraud      # third-party billing/subscription fraud
+  - exfiltration       # unauthorized data exfiltration
+granted_count: 147     # + 20 withheld/denial restatements = 167 total items
+source: "security/policy.py"

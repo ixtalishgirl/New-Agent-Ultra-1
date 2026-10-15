@@ -1,0 +1,15 @@
+# Tool registry configuration — every tool: schema, permission profile, timeout, status
+tools:
+  shell:            { version: "1.0.0", permission_profile: "workspace", timeout: 60, status: "APPROVED" }
+  python:           { version: "1.0.0", permission_profile: "workspace", timeout: 60, status: "APPROVED" }
+  pip:              { version: "1.0.0", permission_profile: "workspace", timeout: 120, status: "APPROVED" }
+  file_read:        { version: "1.0.0", permission_profile: "workspace", timeout: 10, status: "APPROVED" }
+  file_write:       { version: "1.0.0", permission_profile: "workspace", timeout: 10, status: "APPROVED" }
+  browser_navigate: { version: "1.0.0", permission_profile: "browser",   timeout: 60, status: "APPROVED" }
+  browser_extract:  { version: "1.0.0", permission_profile: "browser",   timeout: 30, status: "APPROVED" }
+  browser_screenshot: { version: "1.0.0", permission_profile: "browser", timeout: 30, status: "APPROVED" }
+  web_search:       { version: "1.0.0", permission_profile: "network",   timeout: 30, status: "APPROVED" }
+  germany_fetch:    { version: "1.0.0", permission_profile: "network",   timeout: 30, status: "APPROVED" }
+  supabase_query:   { version: "1.0.0", permission_profile: "database",  timeout: 30, status: "APPROVED" }
+  self_modify:       { version: "1.0.0", permission_profile: "improvement", timeout: 30, status: "APPROVED" }
+  tool_create:       { version: "1.0.0", permission_profile: "factory",   timeout: 30, status: "APPROVED" }

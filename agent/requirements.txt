@@ -1,0 +1,7 @@
+# Haley autonomous coding agent — Python dependencies
+# Core has NO third-party runtime deps (stdlib only: urllib, subprocess, json, re).
+# Optional (later phases):
+# playwright>=1.48.0      # browser automation (Phase 9)
+# supabase>=2.0.0         # Supabase client (Phase 10+)
+# pytest>=8.0.0           # test suite (Phase 7)
+# ruff>=0.4.0             # linting

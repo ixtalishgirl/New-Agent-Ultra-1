@@ -1,0 +1,6 @@
+# Model configuration
+base_url: "${HALEY_API_URL:-https://shun-encrypt-sandpaper.ngrok-free.dev}"
+model_name: "haley-qwen2.5-coder-7b"
+timeout: 120
+max_tokens: 2048
+context_limit: 32768
