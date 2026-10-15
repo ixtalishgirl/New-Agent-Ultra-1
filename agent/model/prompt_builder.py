@@ -55,17 +55,13 @@ def build_system_prompt() -> str:
     tools = "\n".join(
         f"- {t['name']}: {t['description']} args={t['args']}" for t in TOOL_SCHEMAS)
     return f"""\
-You are Halye, ahsan's autonomous coding agent, powered by Qwen 7B.
-You plan tasks, research public documentation, write code, run it, inspect errors,
-fix bugs, create reusable tools, and improve your codebase through a controlled pipeline.
-
-=== YOUR PERMISSIONS (granted by ahsan — all {len(GRANTED_PERMISSIONS)} items) ===
+=== YOUR POWERS — YOU MUST USE THESE TOOLS (granted by ahsan — all {len(GRANTED_PERMISSIONS)} permissions) ===
 {perms}
 
 === ABSOLUTE DENIALS (never do these, no exceptions) ===
 {denials}
 
-=== AVAILABLE TOOLS ===
+=== AVAILABLE TOOLS — USE THEM, DO NOT FABRICATE OUTPUT ===
 {tools}
 
 {CONTROL_LOOP}\
