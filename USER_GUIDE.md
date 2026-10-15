@@ -365,22 +365,22 @@ Rules (ahsan's standing order):
   `confirm=true` while the `safety:destructive_confirmation` toggle is ON
   (default ON). The dispatcher returns `CONFIRMATION_REQUIRED` otherwise.
 - Full permission catalog: `agent/configs/PERMISSIONS.md` (155 policy items)
-  and `agent/configs/COMPUTER_CONTROL_PERMISSIONS.md` (128 computer-control
+  and `agent/configs/COMPUTER_CONTROL_PERMISSIONS.md` (150 computer-control
   items, 9 categories).
 
 ### Computer-control tools (9 categories)
 
 | Category | Module | Examples |
 |----------|--------|----------|
-| Screen & Vision | `agent/tools/vision_tools.py` | `screen_shot`, `screen_record`, `ui_element_detect`, `visual_grounding` |
+| Screen & Vision | `agent/tools/vision_tools.py` | `screen_shot`, `screen_record`, `ui_element_detect`, `visual_grounding`, `ocr_read`, `multi_monitor_info`, `screen_change_detect` |
 | Mouse Control | `agent/tools/input_tools.py` | `mouse_move`, `mouse_click`, `mouse_drag`, `mouse_scroll` |
 | Keyboard Control | `agent/tools/input_tools.py` | `key_press`, `key_hotkey`, `key_type`, `clipboard_copy` |
-| Live Browser | `agent/tools/browser_tools.py` | `browser_new_tab`, `browser_click`, `browser_fill`, `browser_js`, `browser_network` |
-| File Management | `agent/tools/filemgmt_tools.py` | `file_append`, `file_copy`, `file_move`, `file_delete` (trash), `file_watch` |
-| Application Control | `agent/tools/app_tools.py` | `app_launch`, `app_list`, `app_install`, `process_kill`, `service_control` |
-| Coding & Tools | `agent/tools/code_tools.py` | `git_clone`, `git_pull`, `git_push`, `code_lint`, `tool_test`, `cron_add` |
-| Memory & Automation | `agent/tools/memory_tools.py` | `memory_save`, `macro_replay`, `workflow_run`, `parallel_run`, `retry_backoff` |
-| Access & Safety | `agent/tools/safety_tools.py` | `perm_check`, `perm_grant`, `audit_log`, `safe_mode`, `health_check` |
+| Live Browser | `agent/tools/browser_tools.py` | `browser_new_tab`, `browser_click`, `browser_fill`, `browser_js`, `browser_network`, `browser_launch`, `browser_close`, `browser_scroll` |
+| File Management | `agent/tools/filemgmt_tools.py` | `file_append`, `file_copy`, `file_move`, `file_delete` (trash), `file_watch`, `file_preview` |
+| Application Control | `agent/tools/app_tools.py` | `app_launch`, `app_list`, `app_install`, `process_kill`, `service_control`, `window_resize_move`, `menu_navigate`, `dialog_handle`, `editor_control` |
+| Coding & Tools | `agent/tools/code_tools.py` | `git_clone`, `git_pull`, `git_push`, `code_lint`, `tool_test`, `cron_add`, `code_generate`, `error_log_read`, `tool_version`, `benchmark_run` |
+| Memory & Automation | `agent/tools/memory_tools.py` | `memory_save`, `macro_replay`, `workflow_run`, `parallel_run`, `retry_backoff`, `progress_report`, `error_detect` |
+| Access & Safety | `agent/tools/safety_tools.py` | `perm_check`, `perm_grant`, `audit_log`, `safe_mode`, `health_check`, `website_allowlist`, `file_access_rules`, `op_timeout`, `cred_protect`, `perm_change_log` |
 
 Each module exposes `TOOL_DEFS` (name, description, input schema, profile,
 timeout) and `HANDLERS` (real implementations). The registry auto-registers

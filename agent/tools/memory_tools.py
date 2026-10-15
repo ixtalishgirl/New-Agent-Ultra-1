@@ -557,6 +557,105 @@ def _event_emit(args: dict) -> MemoryResult:
         return _result_from_exc(e)
 
 
+
+
+_PROGRESS_FILE = LOG_DIR / "progress.json"
+
+
+def _progress_report(args: dict) -> MemoryResult:
+    """Create/update/query named task-progress entries (persisted JSON)."""
+    try:
+        action = str(args.get("action", "list")).lower()
+        try:
+            data = json.loads(_PROGRESS_FILE.read_text()) if _PROGRESS_FILE.exists() else {}
+        except Exception:
+            data = {}
+        if action == "create" or action == "update":
+            name = str(args.get("name", "")).strip()
+            if not name:
+                return MemoryResult(ok=False, error="name is required")
+            entry = data.get(name, {"name": name, "history": []})
+            if "status" in args:
+                entry["status"] = str(args["status"])
+            if "percent" in args:
+                entry["percent"] = max(0, min(100, int(args["percent"])))
+            if "note" in args:
+                entry["note"] = str(args["note"])
+            entry["updated_at"] = datetime.now(timezone.utc).isoformat()
+            entry["history"].append({"t": entry["updated_at"],
+                                    "status": entry.get("status"),
+                                    "percent": entry.get("percent"),
+                                    "note": entry.get("note")})
+            entry["history"] = entry["history"][-50:]
+            data[name] = entry
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            _PROGRESS_FILE.write_text(json.dumps(data, indent=2))
+            return MemoryResult(ok=True,
+                output=f"progress '{name}': {entry.get('status')} {entry.get('percent', '?')}%",
+                parsed={"entry": entry})
+        if action == "get":
+            name = str(args.get("name", ""))
+            entry = data.get(name)
+            if entry is None:
+                return MemoryResult(ok=False, error=f"no progress entry '{name}'")
+            return MemoryResult(ok=True, output=json.dumps(entry, indent=2),
+                                parsed={"entry": entry})
+        if action == "delete":
+            name = str(args.get("name", ""))
+            if name in data:
+                del data[name]
+                _PROGRESS_FILE.write_text(json.dumps(data, indent=2))
+            return MemoryResult(ok=True, output=f"deleted progress '{name}'",
+                                parsed={"deleted": name})
+        if action == "list":
+            brief = {k: {"status": v.get("status"), "percent": v.get("percent"),
+                         "updated_at": v.get("updated_at")}
+                     for k, v in data.items()}
+            return MemoryResult(ok=True,
+                output=json.dumps(brief, indent=2) if brief else "(no progress entries)",
+                parsed={"entries": brief, "count": len(brief)})
+        return MemoryResult(ok=False, error="action must be create|update|get|list|delete")
+    except Exception as e:
+        return _result_from_exc(e)
+
+
+def _error_detect(args: dict) -> MemoryResult:
+    """Scan the audit log for recent errors; return structured findings."""
+    try:
+        hours = max(0.1, min(float(args.get("hours", 24)), 24 * 30))
+        limit = max(10, min(int(args.get("limit", 200)), 5000))
+        log_path = LOG_DIR / "audit.jsonl"
+        findings = []
+        if log_path.exists():
+            cutoff = time.time() - hours * 3600
+            for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:]:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                ts = rec.get("ts", 0)
+                if ts and ts < cutoff:
+                    continue
+                event = str(rec.get("event", ""))
+                details = rec.get("details", {}) or {}
+                blob = (event + " " + json.dumps(details)).lower()
+                is_err = ("error" in blob or "fail" in blob or "denied" in blob
+                          or "exception" in blob or "timeout" in blob)
+                if is_err:
+                    findings.append({"ts": ts, "event": event,
+                                     "actor": rec.get("actor"),
+                                     "detail": str(details)[:300]})
+        return MemoryResult(ok=True,
+            output=(f"{len(findings)} error-ish audit record(s) in last {hours}h"
+                    if findings else f"no errors in audit log (last {hours}h)"),
+            parsed={"findings": findings, "count": len(findings), "hours": hours})
+    except Exception as e:
+        return _result_from_exc(e)
+
+
 HANDLERS: dict = {
     "memory_save": _memory_save,
     "memory_search": _memory_search,
@@ -573,6 +672,9 @@ HANDLERS: dict = {
     "parallel_run": _parallel_run,
     "retry_backoff": _retry_backoff,
     "event_emit": _event_emit,
+    "progress_report": _progress_report,
+    "error_detect": _error_detect,
+
 }
 
 
@@ -652,4 +754,16 @@ TOOL_DEFS: list[tuple] = [
      {"event": _sch("string", True, "Event name"),
       "data": _sch("object", False, "Payload")},
      "computer", 20),
+    ("progress_report", "Create/update/query named task-progress entries (persisted)",
+     {"action": _sch("string", False, "create|update|get|list|delete (default list)"),
+      "name": _sch("string", False, "Entry name"),
+      "status": _sch("string", False, "Status text"),
+      "percent": _sch("integer", False, "0-100"),
+      "note": _sch("string", False, "Note")},
+     "computer", 30),
+    ("error_detect", "Scan the audit log for recent errors; structured findings",
+     {"hours": _sch("number", False, "Lookback hours (default 24)"),
+      "limit": _sch("integer", False, "Max records to scan (default 200)")},
+     "computer", 60),
+
 ]

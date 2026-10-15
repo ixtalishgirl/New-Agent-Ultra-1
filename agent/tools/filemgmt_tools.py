@@ -16,6 +16,7 @@ Safety:
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -92,6 +93,9 @@ _LOCKED_FDS: dict[str, Any] = {}  # path -> open file object holding the lock
 
 def _file_append(args: dict) -> FileMgmtResult:
     try:
+        _deny = _check_access(args.get("path", ""))
+        if _deny:
+            return FileMgmtResult(ok=False, error=_deny)
         path = Path(args["path"])
         content = str(args.get("content", ""))
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -107,7 +111,13 @@ def _file_append(args: dict) -> FileMgmtResult:
 
 def _file_copy(args: dict) -> FileMgmtResult:
     try:
+        _deny = _check_access(args.get("src", ""))
+        if _deny:
+            return FileMgmtResult(ok=False, error=_deny)
         src = Path(args["src"]); dest = Path(args["dest"])
+        deny = _check_access(args.get("dest", ""))
+        if deny:
+            return FileMgmtResult(ok=False, error=deny)
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dest)
         st = dest.stat()
@@ -120,6 +130,9 @@ def _file_copy(args: dict) -> FileMgmtResult:
 
 def _file_move(args: dict) -> FileMgmtResult:
     try:
+        _deny = _check_access(args.get("src", ""))
+        if _deny:
+            return FileMgmtResult(ok=False, error=_deny)
         src = Path(args["src"]); dest = Path(args["dest"])
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src), str(dest))
@@ -132,6 +145,9 @@ def _file_move(args: dict) -> FileMgmtResult:
 
 def _file_delete(args: dict) -> FileMgmtResult:
     try:
+        _deny = _check_access(args.get("path", ""))
+        if _deny:
+            return FileMgmtResult(ok=False, error=_deny)
         if not args.get("confirm", False):
             return FileMgmtResult(
                 ok=False,
@@ -152,6 +168,9 @@ def _file_delete(args: dict) -> FileMgmtResult:
 
 def _file_rename(args: dict) -> FileMgmtResult:
     try:
+        _deny = _check_access(args.get("src", ""))
+        if _deny:
+            return FileMgmtResult(ok=False, error=_deny)
         src = Path(args["src"]); dest = Path(args["dest"])
         os.rename(src, dest)
         return FileMgmtResult(
@@ -163,6 +182,9 @@ def _file_rename(args: dict) -> FileMgmtResult:
 
 def _dir_create(args: dict) -> FileMgmtResult:
     try:
+        _deny = _check_access(args.get("path", ""))
+        if _deny:
+            return FileMgmtResult(ok=False, error=_deny)
         path = Path(args["path"])
         path.mkdir(parents=True, exist_ok=True)
         return FileMgmtResult(
@@ -344,6 +366,80 @@ def _trash_restore(args: dict) -> FileMgmtResult:
         return _result_from_exc(e)
 
 
+
+
+_RULES_FILE = Path(__file__).resolve().parent.parent / "logs" / "file_access_rules.json"
+
+
+def _check_access(path: str) -> Optional[str]:
+    """Enforce the file_access_rules config (managed by the file_access_rules tool).
+
+    Absent/unparseable rules file -> allow all (user's standing: no restrictions
+    beyond the 5 denials). Returns a denial reason or None when allowed.
+    """
+    try:
+        if not _RULES_FILE.exists():
+            return None
+        rules = json.loads(_RULES_FILE.read_text())
+    except Exception:
+        return None
+    try:
+        rp = str(Path(path).resolve())
+    except Exception:
+        rp = str(path)
+    for prefix in rules.get("deny_prefixes", []) or []:
+        try:
+            if rp.startswith(str(Path(prefix).resolve())):
+                return f"denied by file_access_rules (deny_prefixes): {path}"
+        except Exception:
+            continue
+    if (rules.get("mode") or "allow_all") == "allowlist":
+        for prefix in rules.get("allow_prefixes", []) or []:
+            try:
+                if rp.startswith(str(Path(prefix).resolve())):
+                    return None
+            except Exception:
+                continue
+        return f"denied by file_access_rules (allowlist mode): {path}"
+    return None
+
+
+def _file_preview(args: dict) -> FileMgmtResult:
+    """Preview the head of a file: first N text lines, or a hex head for binaries."""
+    try:
+        path = args.get("path")
+        if not path:
+            return FileMgmtResult(ok=False, error="path is required")
+        p = Path(path)
+        if not p.exists():
+            return FileMgmtResult(ok=False, error=f"not found: {path}")
+        if p.is_dir():
+            return FileMgmtResult(ok=False, error="path is a directory; use dir_list")
+        max_lines = max(1, min(int(args.get("max_lines", 50)), 2000))
+        max_bytes = max(1024, min(int(args.get("max_bytes", 65536)), 1048576))
+        with open(p, "rb") as f:
+            head = f.read(min(max_bytes, 131072))
+        size = p.stat().st_size
+        if b"\x00" in head:
+            hexhead = " ".join(f"{b:02x}" for b in head[:64])
+            return FileMgmtResult(ok=True,
+                output=f"binary file, {size} bytes; hex head: {hexhead}",
+                parsed={"path": str(p), "binary": True, "size": size,
+                        "hex_head": hexhead})
+        text = head.decode("utf-8", errors="replace")
+        all_lines = text.splitlines()
+        lines = all_lines[:max_lines]
+        truncated = len(all_lines) > max_lines or size > len(head)
+        out = "\n".join(lines)
+        if truncated:
+            out += f"\n... [truncated, {size} bytes total]"
+        return FileMgmtResult(ok=True, output=out,
+            parsed={"path": str(p), "binary": False, "size": size,
+                    "lines_shown": len(lines), "truncated": truncated})
+    except Exception as e:
+        return _result_from_exc(e)
+
+
 HANDLERS: dict = {
     "file_append": _file_append,
     "file_copy": _file_copy,
@@ -357,6 +453,8 @@ HANDLERS: dict = {
     "file_watch": _file_watch,
     "file_lock": _file_lock,
     "trash_restore": _trash_restore,
+    "file_preview": _file_preview,
+
 }
 
 
@@ -410,4 +508,10 @@ TOOL_DEFS: list[tuple] = [
      {"trash_name": _sch("string", True, "Name inside ~/.trash or original filename"),
       "dest": _sch("string", False, "Restore destination path (default: cwd/original name)")},
      "computer", 30),
+    ("file_preview", "Preview file head: first N text lines, or hex head for binaries",
+     {"path": _sch("string", True, "File path"),
+      "max_lines": _sch("integer", False, "Max text lines (default 50)"),
+      "max_bytes": _sch("integer", False, "Max bytes to read (default 65536)")},
+     "computer", 30),
+
 ]

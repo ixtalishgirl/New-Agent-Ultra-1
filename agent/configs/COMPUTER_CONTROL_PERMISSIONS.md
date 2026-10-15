@@ -13,7 +13,7 @@ Managed at runtime by `agent/tools/permission_manager.py`
 `check(tool, args)`. Toggle state persists in
 `agent/configs/permission_state.json`.
 
-## 1. Screen & Vision (10)
+## 1. Screen & Vision (13)
 
 | # | Permission | Tool | Description |
 |---|-----------|------|-------------|
@@ -27,6 +27,9 @@ Managed at runtime by `agent/tools/permission_manager.py`
 | 8 | screen_annotation | `screen_annotate` | Draw boxes/labels on a screenshot. |
 | 9 | visual_verification | `visual_verify` | Compare two images, report difference ratio. |
 | 10 | live_browser_view | `browser_tab_screenshot` | Live view of a browser tab (screenshot stream). |
+| 129 | ocr_read | `ocr_read` | OCR text from an image (pytesseract); page-text fallback via URL. |
+| 130 | multi_monitor_info | `multi_monitor_info` | List monitors (screeninfo/xrandr/mss); honest headless note. |
+| 131 | screen_change_detect | `screen_change_detect` | Two screenshots N seconds apart; changed-region boxes + sha256 diff. |
 
 ## 2. Mouse Control (9)
 
@@ -60,7 +63,7 @@ Managed at runtime by `agent/tools/permission_manager.py`
 | 31 | layout_detect | `layout_detect` | Detect current keyboard layout. |
 | 32 | custom_shortcut | `key_macro` | Custom shortcut macro (key sequence with delays). |
 
-## 4. Live Browser Control (25)
+## 4. Live Browser Control (28)
 
 | # | Permission | Tool | Description |
 |---|-----------|------|-------------|
@@ -89,8 +92,11 @@ Managed at runtime by `agent/tools/permission_manager.py`
 | 55 | browser_viewport | `browser_viewport` | Set viewport size. |
 | 56 | browser_user_agent | `browser_ua` | Set user agent for new contexts. |
 | 57 | browser_proxy | `browser_proxy` | Configure proxy (Germany routing). Applies to new contexts. |
+| 132 | browser_launch | `browser_launch` | Start the managed Playwright daemon (idempotent); return CDP port. |
+| 133 | browser_close | `browser_close` | Stop the managed browser daemon gracefully. |
+| 134 | browser_scroll | `browser_scroll` | Scroll page or element (up/down/left/right/top/bottom). |
 
-## 5. File Management (17)
+## 5. File Management (18)
 
 | # | Permission | Tool | Description |
 |---|-----------|------|-------------|
@@ -111,10 +117,11 @@ Managed at runtime by `agent/tools/permission_manager.py`
 | 72 | file_decompress | `archive_extract` / `gzip_decompress` | Decompress (existing tools). |
 | 73 | file_watch | `file_watch` | Watch a file for changes (polling). |
 | 74 | file_lock | `file_lock` | Advisory file lock (fcntl). |
+| 135 | file_preview | `file_preview` | Preview file head: first N text lines, or hex head for binaries. |
 
 Existing tools also cover: `file_checksum`, `trash_restore` (restore from ~/.trash), `disk_usage`.
 
-## 6. Application Control (11)
+## 6. Application Control (15)
 
 | # | Permission | Tool | Description |
 |---|-----------|------|-------------|
@@ -129,8 +136,12 @@ Existing tools also cover: `file_checksum`, `trash_restore` (restore from ~/.tra
 | 83 | process_kill | `process_kill` | Kill by pid. Destructive-confirmation toggle applies. |
 | 84 | process_nice | `process_nice` | Set process niceness. |
 | 85 | service_control | `service_control` | systemctl start/stop/restart/status (best-effort). |
+| 136 | window_resize_move | `window_resize_move` | Resize/move an OS window (wmctrl/xdotool); honest headless note. |
+| 137 | menu_navigate | `menu_navigate` | Keyboard-driven menu navigation (Alt accelerators + arrow keys). |
+| 138 | dialog_handle | `dialog_handle` | Best-effort dialog interaction: confirm/cancel/fill on focused window. |
+| 139 | editor_control | `editor_control` | Open a file at a line (VS Code CLI, $EDITOR, or xdg-open). |
 
-## 7. Coding & Tool Creation (15)
+## 7. Coding & Tool Creation (19)
 
 | # | Permission | Tool | Description |
 |---|-----------|------|-------------|
@@ -152,8 +163,12 @@ Existing tools also cover: `file_checksum`, `trash_restore` (restore from ~/.tra
 | 101 | webhook_create | `webhook_register` | Register a webhook handler file. |
 | 102 | api_client | `api_request` | Generic HTTP API client. |
 | 103 | package_build | `package_build` | Build a zipapp package. |
+| 140 | code_generate | `code_generate` | Render a code scaffold template (script/class/test/cli), syntax-checked. |
+| 141 | error_log_read | `error_log_read` | Tail agent/logs/* with level filter and keyword search. |
+| 142 | tool_version | `tool_version` | Get/set/list sidecar versions for registry tools. |
+| 143 | benchmark_run | `benchmark_run` | Run a registered tool N times; report min/max/mean timings. |
 
-## 8. Memory & Automation (12)
+## 8. Memory & Automation (14)
 
 | # | Permission | Tool | Description |
 |---|-----------|------|-------------|
@@ -170,8 +185,10 @@ Existing tools also cover: `file_checksum`, `trash_restore` (restore from ~/.tra
 | 114 | parallel_execute | `parallel_run` | Run tool calls in parallel (ThreadPoolExecutor). |
 | 115 | retry_backoff | `retry_backoff` | Retry with exponential backoff. |
 | 116 | event_trigger | `event_emit` | Emit an event to the event bus / log. |
+| 144 | progress_report | `progress_report` | Create/update/query named task-progress entries (persisted). |
+| 145 | error_detect | `error_detect` | Scan the audit log for recent errors; structured findings. |
 
-## 9. Access & Safety Controls (11)
+## 9. Access & Safety Controls (16)
 
 | # | Permission | Tool | Description |
 |---|-----------|------|-------------|
@@ -187,6 +204,11 @@ Existing tools also cover: `file_checksum`, `trash_restore` (restore from ~/.tra
 | 126 | backup_create | `backup_create` | tar.gz backup of workspace paths. |
 | 127 | restore_point | `restore_point` | Labeled restore point under agent/logs/restore_points/. |
 | 128 | health_check | `health_check` | Service health: python, disk, registry, permission manager. |
+| 146 | website_allowlist | `website_allowlist` | Website allowlist (YAML); empty = allow all (standing: no restrictions). |
+| 147 | file_access_rules | `file_access_rules` | File path allow/deny rules (JSON); default allow all. Enforced on mutating file ops. |
+| 148 | op_timeout | `op_timeout` | Execute a registered tool with a hard timeout; report timeout instead of hanging. |
+| 149 | cred_protect | `cred_protect` | Scan text for secrets (keys/tokens/passwords); return redacted text + findings. |
+| 150 | perm_change_log | `perm_change_log` | Append/query the permission grant/revoke change history. Auto-logged on grant/revoke. |
 
 ## Boundaries (hard, never overridden)
 

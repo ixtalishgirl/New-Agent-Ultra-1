@@ -60,7 +60,7 @@ class BrowserResult:
 # ---------------------------------------------------------------------------
 
 _DAEMON_SRC = r'''
-import json, socket, sys, time
+import json, os, socket, sys, time
 from pathlib import Path
 
 def _free_port():
@@ -73,6 +73,7 @@ def main():
     hb = base / "heartbeat"
     profile = base / "profile"
     profile.mkdir(parents=True, exist_ok=True)
+    (base / "daemon.pid").write_text(str(os.getpid()))
     cfg_path = base / "context_config.json"
     cfg = {}
     try:
@@ -366,6 +367,40 @@ def main():
                 else:
                     page.wait_for_timeout(ms)
                     out = {"tab_id": tid, "waited_ms": ms}
+            elif op == "scroll":
+                tid, page = resolve(ctx, args.get("tab_id"))
+                direction = (args.get("direction") or "down").lower()
+                pixels = int(args.get("pixels", 600))
+                sel = args.get("selector")
+                if direction == "top":
+                    js = "window.scrollTo(0, 0)"
+                elif direction == "bottom":
+                    js = "window.scrollTo(0, document.body.scrollHeight)"
+                else:
+                    dx, dy = 0, 0
+                    if direction == "down":
+                        dy = pixels
+                    elif direction == "up":
+                        dy = -pixels
+                    elif direction == "right":
+                        dx = pixels
+                    elif direction == "left":
+                        dx = -pixels
+                    else:
+                        raise ValueError(f"bad direction: {direction}")
+                    if sel:
+                        js = ("{ const el = document.querySelector(" +
+                              json.dumps(sel) + "); if (el) el.scrollBy(" +
+                              str(dx) + ", " + str(dy) +
+                              "); else window.scrollBy(" + str(dx) + ", " +
+                              str(dy) + "); }")
+                    else:
+                        js = f"window.scrollBy({dx}, {dy})"
+                page.evaluate(js)
+                page.wait_for_timeout(400)
+                pos = page.evaluate("() => ({x: window.scrollX, y: window.scrollY})")
+                out = {"tab_id": tid, "direction": direction, "pixels": pixels,
+                       "scroll": pos, "url": page.url}
             elif op == "js":
                 tid, page = resolve(ctx, args.get("tab_id"))
                 res = page.evaluate(args["script"])
@@ -840,6 +875,72 @@ def browser_proxy(args: dict) -> BrowserResult:
 
 
 # ---------------------------------------------------------------------------
+
+
+def browser_launch(args: dict) -> BrowserResult:
+    """Start the managed Playwright browser daemon (idempotent); return CDP port."""
+    try:
+        port, err = _ensure_daemon()
+        if port is None:
+            return BrowserResult(ok=False, error=err)
+        return BrowserResult(ok=True,
+            output=f"browser daemon running on CDP port {port}",
+            parsed={"port": port, "cdp_url": f"http://127.0.0.1:{port}",
+                    "running": True})
+    except Exception as e:
+        return BrowserResult(ok=False, error=str(e)[:600])
+
+
+def browser_close(args: dict) -> BrowserResult:
+    """Stop the managed browser daemon (SIGTERM, SIGKILL fallback); clean state files."""
+    try:
+        import signal
+        pid_file = BASE_DIR / "daemon.pid"
+        killed = False
+        try:
+            pid = int(pid_file.read_text().strip())
+            try:
+                os.kill(pid, signal.SIGTERM)
+                for _ in range(20):
+                    time.sleep(0.25)
+                    try:
+                        os.kill(pid, 0)
+                    except OSError:
+                        killed = True
+                        break
+                if not killed:
+                    os.kill(pid, signal.SIGKILL)
+                    killed = True
+            except ProcessLookupError:
+                pass
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError) as e:
+            return BrowserResult(ok=False, error=f"could not stop daemon: {e}")
+        for stale in (PORT_FILE, pid_file, HEARTBEAT):
+            try:
+                stale.unlink()
+            except OSError:
+                pass
+        return BrowserResult(ok=True,
+            output="browser daemon stopped" if killed else "browser daemon was not running",
+            parsed={"stopped": True, "was_running": killed})
+    except Exception as e:
+        return BrowserResult(ok=False, error=str(e)[:600])
+
+
+def browser_scroll(args: dict) -> BrowserResult:
+    """Scroll the page or an element: direction up|down|left|right|top|bottom."""
+    r = _res("scroll", {"tab_id": args.get("tab_id"),
+                        "direction": args.get("direction", "down"),
+                        "pixels": args.get("pixels", 600),
+                        "selector": args.get("selector")})
+    if r.ok:
+        r.output = (f"scrolled {r.parsed.get('direction')} "
+                    f"-> scroll={r.parsed.get('scroll')}")
+    return r
+
+
 # Module contract
 # ---------------------------------------------------------------------------
 
@@ -928,6 +1029,16 @@ TOOL_DEFS: list[tuple] = [
     ("browser_proxy", "Set proxy for new contexts (stored config; new tabs only)",
      {"proxy_url": _S("string", True, "Proxy URL, e.g. http://host:port")},
      "computer", 60),
+    ("browser_launch", "Start the managed Playwright browser daemon (idempotent)",
+     {}, "computer", 90),
+    ("browser_close", "Stop the managed browser daemon gracefully",
+     {}, "computer", 60),
+    ("browser_scroll", "Scroll page or element (up|down|left|right|top|bottom)",
+     {**_TAB, "direction": _S("string", False, "Direction (default down)"),
+      "pixels": _S("integer", False, "Pixels for directional scroll (default 600)"),
+      "selector": _S("string", False, "CSS selector to scroll instead of page")},
+     "computer", 60),
+
 ]
 
 HANDLERS: dict[str, Any] = {
@@ -956,6 +1067,10 @@ HANDLERS: dict[str, Any] = {
     "browser_viewport": browser_viewport,
     "browser_ua": browser_ua,
     "browser_proxy": browser_proxy,
+    "browser_launch": browser_launch,
+    "browser_close": browser_close,
+    "browser_scroll": browser_scroll,
+
 }
 
 __all__ = ["BrowserResult", "TOOL_DEFS", "HANDLERS"]

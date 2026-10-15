@@ -25,7 +25,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 DEFAULT_TIMEOUT = 60
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -128,6 +128,7 @@ def _perm_grant(args: dict) -> SafetyResult:
         res = mgr.enable(name)
         if res.allowed:
             _audit().record("perm.grant", details={"name": name})
+            _perm_change_log({"action": "log", "name": name, "change": "grant"})
         return SafetyResult(ok=res.allowed, output=res.reason,
                             parsed={"name": name, "granted": res.allowed},
                             error="" if res.allowed else res.reason)
@@ -144,6 +145,7 @@ def _perm_revoke(args: dict) -> SafetyResult:
         res = mgr.disable(name)
         if res.allowed:
             _audit().record("perm.revoke", details={"name": name})
+            _perm_change_log({"action": "log", "name": name, "change": "revoke"})
         return SafetyResult(ok=res.allowed, output=res.reason,
                             parsed={"name": name, "revoked": res.allowed},
                             error="" if res.allowed else res.reason)
@@ -346,6 +348,232 @@ def _health_check(args: dict) -> SafetyResult:
         return _result_from_exc(e)
 
 
+
+
+# ---------------------------------------------------------------------------
+# Executor injection (bound by Dispatcher so nested tool calls are gated)
+# ---------------------------------------------------------------------------
+_EXECUTOR: Optional[Callable[[str, dict], Any]] = None
+
+
+def set_executor(fn: Callable[[str, dict], Any]) -> None:
+    """Bind the dispatcher executor: fn(tool_name, args) -> result with .ok/.output/.parsed/.error."""
+    global _EXECUTOR
+    _EXECUTOR = fn
+
+
+def _exec(tool: str, args: dict) -> Any:
+    if _EXECUTOR is None:
+        return None
+    return _EXECUTOR(tool, args)
+
+
+_ALLOWLIST_FILE = LOG_DIR / "website_allowlist.yaml"
+_FILE_RULES_FILE = LOG_DIR / "file_access_rules.json"
+_PERM_CHANGES_FILE = LOG_DIR / "perm_changes.jsonl"
+
+
+def _website_allowlist(args: dict) -> SafetyResult:
+    """Manage the website allowlist (persisted YAML). Empty list = allow all (user's standing)."""
+    try:
+        import yaml  # type: ignore
+        action = str(args.get("action", "get")).lower()
+        try:
+            data = yaml.safe_load(_ALLOWLIST_FILE.read_text()) or {} if _ALLOWLIST_FILE.exists() else {}
+        except Exception:
+            data = {}
+        domains = list(dict.fromkeys(data.get("domains", []) or []))
+        if action == "get":
+            return SafetyResult(ok=True,
+                output=("allowlist: " + ", ".join(domains)) if domains else "allowlist empty -> all websites allowed",
+                parsed={"domains": domains, "mode": "allow_all" if not domains else "allowlist"})
+        if action == "add":
+            d = str(args.get("domain", "")).strip().lower()
+            if not d:
+                return SafetyResult(ok=False, error="domain is required")
+            if d not in domains:
+                domains.append(d)
+            data["domains"] = domains
+            _ALLOWLIST_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _ALLOWLIST_FILE.write_text(yaml.safe_dump(data, default_flow_style=False))
+            return SafetyResult(ok=True, output=f"allowlisted {d}",
+                                parsed={"domains": domains})
+        if action == "remove":
+            d = str(args.get("domain", "")).strip().lower()
+            domains = [x for x in domains if x != d]
+            data["domains"] = domains
+            _ALLOWLIST_FILE.write_text(yaml.safe_dump(data, default_flow_style=False))
+            return SafetyResult(ok=True, output=f"removed {d} from allowlist",
+                                parsed={"domains": domains})
+        if action == "clear":
+            if not args.get("confirm"):
+                return SafetyResult(ok=False, error="clear needs confirm=true")
+            _ALLOWLIST_FILE.write_text(yaml.safe_dump({"domains": []}, default_flow_style=False))
+            return SafetyResult(ok=True, output="allowlist cleared -> all websites allowed",
+                                parsed={"domains": []})
+        return SafetyResult(ok=False, error="action must be get|add|remove|clear")
+    except Exception as e:
+        return _result_from_exc(e)
+
+
+def _file_access_rules(args: dict) -> SafetyResult:
+    """Manage file access rules (persisted JSON). Default: allow all paths."""
+    try:
+        action = str(args.get("action", "get")).lower()
+        try:
+            rules = json.loads(_FILE_RULES_FILE.read_text()) if _FILE_RULES_FILE.exists() else {}
+        except Exception:
+            rules = {}
+        rules.setdefault("mode", "allow_all")
+        rules.setdefault("allow_prefixes", [])
+        rules.setdefault("deny_prefixes", [])
+        if action == "get":
+            return SafetyResult(ok=True, output=json.dumps(rules, indent=2),
+                                parsed={"rules": rules})
+        if action == "set":
+            mode = str(args.get("mode", "allow_all")).lower()
+            if mode not in ("allow_all", "allowlist", "denylist"):
+                return SafetyResult(ok=False, error="mode must be allow_all|allowlist|denylist")
+            rules["mode"] = mode
+            if "allow_prefixes" in args:
+                rules["allow_prefixes"] = [str(p) for p in (args["allow_prefixes"] or [])]
+            if "deny_prefixes" in args:
+                rules["deny_prefixes"] = [str(p) for p in (args["deny_prefixes"] or [])]
+        elif action == "add_allow":
+            p = str(args.get("path", ""))
+            if p and p not in rules["allow_prefixes"]:
+                rules["allow_prefixes"].append(p)
+        elif action == "add_deny":
+            p = str(args.get("path", ""))
+            if p and p not in rules["deny_prefixes"]:
+                rules["deny_prefixes"].append(p)
+        elif action == "clear":
+            if not args.get("confirm"):
+                return SafetyResult(ok=False, error="clear needs confirm=true")
+            rules = {"mode": "allow_all", "allow_prefixes": [], "deny_prefixes": []}
+        else:
+            return SafetyResult(ok=False, error="action must be get|set|add_allow|add_deny|clear")
+        _FILE_RULES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _FILE_RULES_FILE.write_text(json.dumps(rules, indent=2))
+        return SafetyResult(ok=True, output=f"file access rules updated (mode={rules['mode']})",
+                            parsed={"rules": rules})
+    except Exception as e:
+        return _result_from_exc(e)
+
+
+def _op_timeout(args: dict) -> SafetyResult:
+    """Execute a registered tool with a hard timeout; report timeout instead of hanging."""
+    try:
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as _TE
+        tool = args.get("tool")
+        if not tool:
+            return SafetyResult(ok=False, error="tool is required")
+        if _EXECUTOR is None:
+            return SafetyResult(ok=False, error=
+                "no executor bound (Dispatcher binds set_executor at runtime)")
+        timeout = max(1.0, min(float(args.get("timeout_sec", 60)), 3600.0))
+        targs = args.get("args") or {}
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            fut = pool.submit(_EXECUTOR, tool, dict(targs))
+            try:
+                r = fut.result(timeout=timeout)
+            except _TE:
+                return SafetyResult(ok=False,
+                    output=f"TIMEOUT: {tool} exceeded {timeout}s (worker thread abandoned; "
+                           f"CPython cannot kill threads, side effects may still complete)",
+                    parsed={"tool": tool, "timeout_sec": timeout, "timed_out": True},
+                    error=f"timed out after {timeout}s")
+        ok = bool(getattr(r, "ok", False))
+        return SafetyResult(ok=ok,
+            output=str(getattr(r, "output", "") or getattr(r, "error", ""))[:2000],
+            parsed={"tool": tool, "timed_out": False,
+                    "inner": getattr(r, "parsed", {})},
+            error="" if ok else str(getattr(r, "error", "tool failed"))[:300])
+    except Exception as e:
+        return _result_from_exc(e)
+
+
+_CRED_PATTERNS = [
+    ("aws_access_key", r"AKIA[0-9A-Z]{16}"),
+    ("github_pat", r"ghp_[A-Za-z0-9]{36}"),
+    ("github_oauth", r"gho_[A-Za-z0-9]{36}"),
+    ("openai_key", r"sk-[A-Za-z0-9]{20,}"),
+    ("private_key", r"-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----"),
+    ("bearer_token", r"(?i)bearer\s+[A-Za-z0-9\-_.]{16,}"),
+    ("password_assign", r"(?i)(password|passwd|pwd)\s*[:=]\s*['\"]?([^\s'\"]{4,})"),
+    ("secret_assign", r"(?i)(api[_-]?key|apikey|secret|token)\s*[:=]\s*['\"]?([A-Za-z0-9\-_.]{12,})['\"]?"),
+]
+
+
+def _cred_protect(args: dict) -> SafetyResult:
+    """Scan text for secret patterns; return redacted text + findings."""
+    try:
+        import re as _re
+        text = str(args.get("text", ""))
+        findings: list = []
+        redacted = text
+        for kind, pat in _CRED_PATTERNS:
+            try:
+                rx = _re.compile(pat)
+            except _re.error:
+                continue
+            matches = rx.findall(redacted)
+            n = len(matches)
+            if n:
+                findings.append({"kind": kind, "count": n})
+                redacted = rx.sub(f"***REDACTED:{kind}***", redacted)
+        return SafetyResult(ok=True,
+            output=redacted[:4000] if redacted else "(empty)",
+            parsed={"redacted": redacted, "findings": findings,
+                    "secrets_found": sum(f["count"] for f in findings)})
+    except Exception as e:
+        return _result_from_exc(e)
+
+
+def _perm_change_log(args: dict) -> SafetyResult:
+    """Append/query the permission grant/revoke change history (JSONL)."""
+    try:
+        action = str(args.get("action", "tail")).lower()
+        if action == "log":
+            name = str(args.get("name", ""))
+            change = str(args.get("change", ""))
+            if not name or not change:
+                return SafetyResult(ok=False, error="log needs name and change")
+            entry = {"t": datetime.now(timezone.utc).isoformat(), "name": name,
+                     "change": change, "actor": str(args.get("actor", "agent"))}
+            _PERM_CHANGES_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with open(_PERM_CHANGES_FILE, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
+            return SafetyResult(ok=True, output=f"logged {change} on {name}",
+                                parsed={"entry": entry})
+        tail = max(1, min(int(args.get("tail", 50)), 1000))
+        name_filter = str(args.get("name", ""))
+        entries = []
+        if _PERM_CHANGES_FILE.exists():
+            for line in _PERM_CHANGES_FILE.read_text(encoding="utf-8").splitlines()[-tail:]:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                if name_filter and rec.get("name") != name_filter:
+                    continue
+                entries.append(rec)
+        if action == "query":
+            return SafetyResult(ok=True,
+                output=json.dumps(entries, indent=2) if entries else "(no matching entries)",
+                parsed={"entries": entries, "count": len(entries)})
+        if action == "tail":
+            return SafetyResult(ok=True,
+                output=json.dumps(entries, indent=2) if entries else "(no permission changes logged yet)",
+                parsed={"entries": entries, "count": len(entries)})
+        return SafetyResult(ok=False, error="action must be log|query|tail")
+    except Exception as e:
+        return _result_from_exc(e)
+
+
 HANDLERS: dict = {
     "perm_check": _perm_check,
     "perm_grant": _perm_grant,
@@ -359,6 +587,12 @@ HANDLERS: dict = {
     "backup_create": _backup_create,
     "restore_point": _restore_point,
     "health_check": _health_check,
+    "website_allowlist": _website_allowlist,
+    "file_access_rules": _file_access_rules,
+    "op_timeout": _op_timeout,
+    "cred_protect": _cred_protect,
+    "perm_change_log": _perm_change_log,
+
 }
 
 
@@ -408,4 +642,33 @@ TOOL_DEFS: list[tuple] = [
     ("health_check", "python version, disk free, registry import, permission-manager presence",
      {},
      "computer", 30),
+    ("website_allowlist", "Manage website allowlist (YAML); empty = allow all",
+     {"action": _sch("string", False, "get|add|remove|clear (default get)"),
+      "domain": _sch("string", False, "Domain for add/remove"),
+      "confirm": _sch("boolean", False, "Confirm clear")},
+     "computer", 30),
+    ("file_access_rules", "Manage file access rules (JSON); default allow all paths",
+     {"action": _sch("string", False, "get|set|add_allow|add_deny|clear (default get)"),
+      "mode": _sch("string", False, "allow_all|allowlist|denylist"),
+      "allow_prefixes": _sch("array", False, "Allowed path prefixes"),
+      "deny_prefixes": _sch("array", False, "Denied path prefixes"),
+      "path": _sch("string", False, "Path for add_allow/add_deny"),
+      "confirm": _sch("boolean", False, "Confirm clear")},
+     "computer", 30),
+    ("op_timeout", "Execute a registered tool with a hard timeout",
+     {"tool": _sch("string", True, "Tool name"),
+      "args": _sch("object", False, "Tool args"),
+      "timeout_sec": _sch("number", False, "Timeout seconds (default 60)")},
+     "computer", 3700),
+    ("cred_protect", "Scan text for secrets (keys/tokens/passwords); return redacted text + findings",
+     {"text": _sch("string", True, "Text to scan")},
+     "computer", 30),
+    ("perm_change_log", "Append/query permission grant/revoke change history",
+     {"action": _sch("string", False, "log|query|tail (default tail)"),
+      "name": _sch("string", False, "Permission name"),
+      "change": _sch("string", False, "grant|revoke for log"),
+      "actor": _sch("string", False, "Who made the change"),
+      "tail": _sch("integer", False, "Max entries (default 50)")},
+     "computer", 30),
+
 ]

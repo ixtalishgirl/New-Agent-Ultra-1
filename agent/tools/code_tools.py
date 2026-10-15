@@ -14,6 +14,8 @@ credentials into output.
 from __future__ import annotations
 
 import ast
+import threading
+import time
 import importlib
 import json
 import os
@@ -27,7 +29,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Optional
 
 DEFAULT_TIMEOUT = 60
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -464,6 +466,231 @@ def _tool_test(args: dict) -> CodeResult:
         return _result_from_exc(e)
 
 
+
+
+# ---------------------------------------------------------------------------
+# Executor injection (bound by Dispatcher so nested tool calls are gated)
+# ---------------------------------------------------------------------------
+_EXECUTOR: Optional[Callable[[str, dict], Any]] = None
+
+
+def set_executor(fn: Callable[[str, dict], Any]) -> None:
+    """Bind the dispatcher executor: fn(tool_name, args) -> result with .ok/.output/.parsed/.error."""
+    global _EXECUTOR
+    _EXECUTOR = fn
+
+
+def _exec(tool: str, args: dict) -> Any:
+    if _EXECUTOR is None:
+        return None
+    return _EXECUTOR(tool, args)
+
+
+_CODE_TEMPLATES = {
+    "script": (
+        '#!/usr/bin/env python3\n"""{name} — generated scaffold."""\n'
+        "\n\n"
+        "def main() -> int:\n"
+        '    print("hello from {name}")\n'
+        "    return 0\n"
+        "\n\n"
+        'if __name__ == "__main__":\n'
+        "    raise SystemExit(main())\n"
+    ),
+    "class": (
+        '"""{name} — generated scaffold."""\n'
+        "\n\n"
+        "class {ClassName}:\n"
+        '    """TODO: document."""\n'
+        "\n"
+        "    def __init__(self) -> None:\n"
+        "        pass\n"
+        "\n"
+        "    def run(self):\n"
+        '        """TODO: implement."""\n'
+        "        raise NotImplementedError\n"
+    ),
+    "test": (
+        '"""Tests for {name}."""\n'
+        "import unittest\n"
+        "\n\n"
+        "class Test{name_cap}(unittest.TestCase):\n"
+        "    def test_smoke(self):\n"
+        "        self.assertTrue(True)\n"
+        "\n\n"
+        'if __name__ == "__main__":\n'
+        '    unittest.main()\n'
+    ),
+    "cli": (
+        '#!/usr/bin/env python3\n"""{name} — generated CLI scaffold."""\n'
+        "import argparse\n"
+        "\n\n"
+        "def build_parser() -> argparse.ArgumentParser:\n"
+        '    p = argparse.ArgumentParser(description="{name}")\n'
+        '    p.add_argument("--name", default="world")\n'
+        "    return p\n"
+        "\n\n"
+        "def main() -> int:\n"
+        "    args = build_parser().parse_args()\n"
+        '    print(f"hello {{args.name}}")\n'
+        "    return 0\n"
+        "\n\n"
+        'if __name__ == "__main__":\n'
+        "    raise SystemExit(main())\n"
+    ),
+}
+
+
+def _code_generate(args: dict) -> CodeResult:
+    """Render a code scaffold template (script/class/test/cli), syntax-check it, write to file."""
+    try:
+        kind = str(args.get("kind", "script")).lower()
+        name = str(args.get("name", "generated")).strip() or "generated"
+        output = args.get("output")
+        if kind not in _CODE_TEMPLATES:
+            return CodeResult(ok=False,
+                error=f"unknown kind '{kind}'; choose from {sorted(_CODE_TEMPLATES)}")
+        safe = "".join(c if (c.isalnum() or c in "_-") else "_" for c in name)
+        class_name = "".join(p[:1].upper() + p[1:] for p in safe.split("_") if p) or "Generated"
+        code = _CODE_TEMPLATES[kind].format(name=safe, ClassName=class_name,
+                                           name_cap=class_name)
+        extra = args.get("extra_code")
+        if extra:
+            code += "\n\n" + str(extra)
+        try:
+            ast.parse(code)
+        except SyntaxError as se:
+            return CodeResult(ok=False, error=f"template produced invalid Python: {se}")
+        if not output:
+            output = f"{safe}.py"
+        out = Path(output)
+        if out.exists() and not args.get("overwrite"):
+            return CodeResult(ok=False,
+                error=f"{out} exists; pass overwrite=true to replace")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(code, encoding="utf-8")
+        return CodeResult(ok=True,
+            output=f"generated {kind} scaffold -> {out} ({len(code)} chars, syntax OK)",
+            parsed={"path": str(out), "kind": kind, "chars": len(code)})
+    except Exception as e:
+        return CodeResult(ok=False, error=str(e)[:600])
+
+
+def _error_log_read(args: dict) -> CodeResult:
+    """Tail agent/logs/* with level filter and keyword search."""
+    try:
+        log_dir = REPO_ROOT / "agent" / "logs"
+        name = str(args.get("log", "")).strip()
+        if name:
+            files = [log_dir / name] if (log_dir / name).exists() else []
+            if not files:
+                return CodeResult(ok=False, error=f"log not found: {name}")
+        else:
+            files = sorted(log_dir.glob("*.log")) + sorted(log_dir.glob("*.jsonl"))
+        tail = max(1, min(int(args.get("tail", 100)), 5000))
+        level = str(args.get("level", "")).upper()
+        keyword = str(args.get("keyword", ""))
+        hits = []
+        for f in files:
+            try:
+                lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+            for line in lines:
+                up = line.upper()
+                if level and level not in up and not any(
+                        k in up for k in (level,)):
+                    continue
+                if keyword and keyword not in line:
+                    continue
+                hits.append(f"[{f.name}] {line}")
+        hits = hits[-tail:]
+        return CodeResult(ok=True,
+            output="\n".join(hits) if hits else "(no matching log lines)",
+            parsed={"matches": len(hits), "files": [f.name for f in files],
+                    "level": level, "keyword": keyword})
+    except Exception as e:
+        return CodeResult(ok=False, error=str(e)[:600])
+
+
+_VERSIONS_FILE = REPO_ROOT / "agent" / "logs" / "tool_versions.json"
+
+
+def _tool_version(args: dict) -> CodeResult:
+    """Get/set/list sidecar versions for registry tools."""
+    try:
+        action = str(args.get("action", "list")).lower()
+        try:
+            data = json.loads(_VERSIONS_FILE.read_text()) if _VERSIONS_FILE.exists() else {}
+        except Exception:
+            data = {}
+        if action == "get":
+            name = args.get("name", "")
+            return CodeResult(ok=True, output=f"{name} = {data.get(name, '1.0.0 (default)')}",
+                              parsed={"name": name, "version": data.get(name, "1.0.0")})
+        if action == "set":
+            name = args.get("name", "")
+            version = str(args.get("version", ""))
+            if not name or not version:
+                return CodeResult(ok=False, error="set needs name and version")
+            import re as _re
+            if not _re.match(r"^\d+\.\d+\.\d+([.\-+]\w+)*$", version):
+                return CodeResult(ok=False, error=f"bad version '{version}' (want X.Y.Z)")
+            data[name] = version
+            _VERSIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _VERSIONS_FILE.write_text(json.dumps(data, indent=2))
+            return CodeResult(ok=True, output=f"{name} version set to {version}",
+                              parsed={"name": name, "version": version})
+        if action == "list":
+            return CodeResult(ok=True,
+                output=json.dumps(data, indent=2) if data else "(no overrides; all tools at registry default 1.0.0)",
+                parsed={"versions": data, "count": len(data)})
+        return CodeResult(ok=False, error="action must be get|set|list")
+    except Exception as e:
+        return CodeResult(ok=False, error=str(e)[:600])
+
+
+def _benchmark_run(args: dict) -> CodeResult:
+    """Run a registered tool N times via the dispatcher executor; report timing stats."""
+    try:
+        tool = args.get("tool")
+        if not tool:
+            return CodeResult(ok=False, error="tool is required")
+        if _EXECUTOR is None:
+            return CodeResult(ok=False, error=
+                "no executor bound (Dispatcher binds set_executor at runtime); "
+                "cannot benchmark outside dispatch")
+        targs = args.get("args") or {}
+        times = max(1, min(int(args.get("times", 5)), 50))
+        durations = []
+        ok_count = 0
+        last_err = ""
+        for _ in range(times):
+            t0 = time.perf_counter()
+            try:
+                r = _EXECUTOR(tool, dict(targs))
+                ok = bool(getattr(r, "ok", False))
+                if ok:
+                    ok_count += 1
+                else:
+                    last_err = str(getattr(r, "error", getattr(r, "output", "")))[:200]
+            except Exception as e:
+                last_err = str(e)[:200]
+            durations.append(time.perf_counter() - t0)
+        durations.sort()
+        stats = {"runs": times, "ok": ok_count, "failed": times - ok_count,
+                 "min_s": round(durations[0], 4), "max_s": round(durations[-1], 4),
+                 "mean_s": round(sum(durations) / len(durations), 4),
+                 "p50_s": round(durations[len(durations) // 2], 4),
+                 "last_error": last_err}
+        return CodeResult(ok=ok_count > 0,
+            output=(f"{tool} x{times}: ok={ok_count} min={stats['min_s']}s "
+                    f"max={stats['max_s']}s mean={stats['mean_s']}s"),
+            parsed={"tool": tool, **stats})
+    except Exception as e:
+        return CodeResult(ok=False, error=str(e)[:600])
+
+
 HANDLERS: dict = {
     "git_clone": _git_clone,
     "git_pull": _git_pull,
@@ -478,6 +705,11 @@ HANDLERS: dict = {
     "api_request": _api_request,
     "package_build": _package_build,
     "tool_test": _tool_test,
+    "code_generate": _code_generate,
+    "error_log_read": _error_log_read,
+    "tool_version": _tool_version,
+    "benchmark_run": _benchmark_run,
+
 }
 
 
@@ -537,4 +769,28 @@ TOOL_DEFS: list[tuple] = [
      {"name": _sch("string", True, "Tool name"),
       "args": _sch("object", False, "Sample args dict")},
      "computer", 60),
+    ("code_generate", "Render a code scaffold template (script/class/test/cli), syntax-check, write file",
+     {"kind": _sch("string", False, "script|class|test|cli (default script)"),
+      "name": _sch("string", False, "Base name (default generated)"),
+      "output": _sch("string", False, "Output path (default <name>.py)"),
+      "extra_code": _sch("string", False, "Extra Python appended to the scaffold"),
+      "overwrite": _sch("boolean", False, "Replace existing file")},
+     "computer", 60),
+    ("error_log_read", "Tail agent/logs/* with level filter and keyword search",
+     {"log": _sch("string", False, "Log filename (default: all)"),
+      "tail": _sch("integer", False, "Max lines (default 100)"),
+      "level": _sch("string", False, "ERROR|WARNING|INFO filter"),
+      "keyword": _sch("string", False, "Substring filter")},
+     "computer", 30),
+    ("tool_version", "Get/set/list sidecar versions for registry tools",
+     {"action": _sch("string", False, "get|set|list (default list)"),
+      "name": _sch("string", False, "Tool name"),
+      "version": _sch("string", False, "X.Y.Z for set")},
+     "computer", 30),
+    ("benchmark_run", "Run a registered tool N times; report min/max/mean timings",
+     {"tool": _sch("string", True, "Tool name"),
+      "args": _sch("object", False, "Args per run"),
+      "times": _sch("integer", False, "Runs 1-50 (default 5)")},
+     "computer", 600),
+
 ]

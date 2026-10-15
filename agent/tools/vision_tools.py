@@ -717,6 +717,213 @@ def visual_verify(args: dict) -> VisionResult:
 
 
 # ---------------------------------------------------------------------------
+
+_PW_TEXT_SCRIPT = r"""
+import json, sys
+from playwright.sync_api import sync_playwright
+
+def main():
+    args = json.loads(sys.argv[1])
+    out = {}
+    try:
+        with sync_playwright() as p:
+            b = p.chromium.launch(headless=True, args=["--no-sandbox"])
+            pg = b.new_page()
+            pg.goto(args["url"], timeout=30000, wait_until="domcontentloaded")
+            out["text"] = pg.evaluate(
+                "() => document.body ? document.body.innerText : ''")
+            b.close()
+    except Exception as e:
+        out = {"error": str(e)[:800]}
+    print(json.dumps(out))
+
+main()
+"""
+
+
+def ocr_read(args: dict) -> VisionResult:
+    """OCR text from an image (pytesseract); optional url enables Playwright page-text fallback."""
+    try:
+        image_path = args.get("image_path")
+        url = args.get("url")
+        if not image_path:
+            image_path = _shot_path("ocr")
+            if _capture_mss(image_path):
+                cap_backend = "mss"
+            else:
+                ok, which = _capture_cli(image_path)
+                cap_backend = which if ok else ""
+            if not cap_backend:
+                if url and _playwright_available():
+                    res = _run_playwright_script(_PW_TEXT_SCRIPT, {"url": url}, timeout=90)
+                    if res.get("error"):
+                        return VisionResult(ok=False, error=
+                            f"no capture backend; page-text fallback failed: {res['error']}")
+                    text = res.get("text", "")
+                    return VisionResult(ok=True,
+                        output=(text.strip()[:4000] or "(no text)"),
+                        parsed={"text": text.strip(), "backend": "playwright-page-text",
+                                "url": url})
+                return VisionResult(ok=False, error=
+                    "no screen-capture backend (no display, no mss/CLI); "
+                    "pass image_path or url")
+        if not Path(image_path).exists():
+            return VisionResult(ok=False, error=f"image not found: {image_path}")
+        try:
+            import pytesseract  # type: ignore
+            if Image is None:
+                raise ImportError("PIL missing")
+            img = Image.open(image_path)
+            text = pytesseract.image_to_string(img)
+            conf = None
+            try:
+                data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
+                confs = [int(c) for c in data.get("conf", [])
+                         if str(c).strip().lstrip("-").isdigit() and int(c) >= 0]
+                conf = round(sum(confs) / len(confs), 1) if confs else None
+            except Exception:
+                pass
+            note = f"\nmean_confidence={conf}" if conf is not None else ""
+            return VisionResult(ok=True,
+                output=(text.strip()[:4000] or "(no text detected)") + note,
+                parsed={"text": text.strip(), "backend": "pytesseract",
+                        "mean_confidence": conf, "image": image_path})
+        except Exception as te:
+            if url and _playwright_available():
+                res = _run_playwright_script(_PW_TEXT_SCRIPT, {"url": url}, timeout=90)
+                if res.get("error"):
+                    return VisionResult(ok=False, error=
+                        f"pytesseract unavailable ({te}); page-text fallback failed: {res['error']}")
+                text = res.get("text", "")
+                return VisionResult(ok=True,
+                    output=(text.strip()[:4000] or "(no text)"),
+                    parsed={"text": text.strip(), "backend": "playwright-page-text",
+                            "url": url, "note": f"pytesseract unavailable: {te}"})
+            return VisionResult(ok=False, error=
+                f"pytesseract unavailable ({te}). Install tesseract-ocr + pytesseract, "
+                f"or pass url for page-text fallback.")
+    except Exception as e:
+        return VisionResult(ok=False, error=str(e)[:600])
+
+
+def multi_monitor_info(args: dict) -> VisionResult:
+    """List monitors via screeninfo, else xrandr, else mss; honest note when headless."""
+    try:
+        monitors: list = []
+        backend = ""
+        try:
+            from screeninfo import get_monitors  # type: ignore
+            for m in get_monitors():
+                monitors.append({"name": str(getattr(m, "name", "")),
+                                 "x": m.x, "y": m.y, "width": m.width,
+                                 "height": m.height,
+                                 "is_primary": bool(getattr(m, "is_primary", False))})
+            if monitors:
+                backend = "screeninfo"
+        except Exception:
+            pass
+        if not monitors and shutil.which("xrandr") and os.environ.get("DISPLAY"):
+            try:
+                proc = subprocess.run(["xrandr", "--query"], capture_output=True,
+                                      text=True, timeout=15)
+                import re as _re
+                for line in proc.stdout.splitlines():
+                    m = _re.match(r"^(\S+) connected (?:primary )?(\d+)x(\d+)\+(\d+)\+(\d+)", line)
+                    if m:
+                        monitors.append({"name": m.group(1), "x": int(m.group(4)),
+                                         "y": int(m.group(5)), "width": int(m.group(2)),
+                                         "height": int(m.group(3)),
+                                         "is_primary": "primary" in line})
+                if monitors:
+                    backend = "xrandr"
+            except Exception:
+                pass
+        if not monitors and mss is not None:
+            try:
+                with mss.mss() as sct:
+                    mons = sct.monitors[1:] if len(sct.monitors) > 1 else sct.monitors
+                    for i, mon in enumerate(mons):
+                        monitors.append({"name": f"monitor-{i}", "x": mon["left"],
+                                         "y": mon["top"], "width": mon["width"],
+                                         "height": mon["height"], "is_primary": i == 0})
+                if monitors:
+                    backend = "mss"
+            except Exception:
+                pass
+        note = f"backend={backend or 'none'}; DISPLAY={os.environ.get('DISPLAY', '(unset)')}"
+        if not monitors:
+            return VisionResult(ok=True,
+                output=f"no monitors detected ({note}); headless host has no real display",
+                parsed={"monitors": [], "backend": backend, "note": note})
+        desc = "; ".join(f"{m['name']} {m['width']}x{m['height']}+{m['x']}+{m['y']}"
+                         for m in monitors)
+        return VisionResult(ok=True,
+            output=f"{len(monitors)} monitor(s) via {backend}: {desc}",
+            parsed={"monitors": monitors, "backend": backend})
+    except Exception as e:
+        return VisionResult(ok=False, error=str(e)[:600])
+
+
+def screen_change_detect(args: dict) -> VisionResult:
+    """Capture two screenshots interval_sec apart; report changed-region boxes + sha256 diff."""
+    try:
+        import hashlib
+        interval = max(0.2, min(float(args.get("interval_sec", 2.0)), 60.0))
+        region = args.get("region")
+
+        def grab(tag: str):
+            p = _shot_path(f"chg_{tag}")
+            if _capture_mss(p, region):
+                return p, "mss"
+            ok, which = _capture_cli(p)
+            return (p, which) if ok else (None, which)
+
+        p1, b1 = grab("a")
+        if not p1:
+            return VisionResult(ok=False, error=f"first capture failed: {b1}")
+        time.sleep(interval)
+        p2, b2 = grab("b")
+        if not p2:
+            return VisionResult(ok=False, error=f"second capture failed: {b2}")
+        h1 = hashlib.sha256(Path(p1).read_bytes()).hexdigest()
+        h2 = hashlib.sha256(Path(p2).read_bytes()).hexdigest()
+        boxes: list = []
+        changed = h1 != h2
+        if changed and Image is not None:
+            try:
+                ia = Image.open(p1).convert("RGB")
+                ib = Image.open(p2).convert("RGB")
+                if ia.size == ib.size:
+                    w, h = ia.size
+                    cell = max(32, w // 24)
+                    da, db = ia.load(), ib.load()
+                    for gy in range(0, h, cell):
+                        for gx in range(0, w, cell):
+                            hit = False
+                            for yy in range(gy, min(gy + cell, h), 4):
+                                for xx in range(gx, min(gx + cell, w), 4):
+                                    pa, pb = da[xx, yy], db[xx, yy]
+                                    if abs(pa[0] - pb[0]) + abs(pa[1] - pb[1]) + abs(pa[2] - pb[2]) > 60:
+                                        hit = True
+                                        break
+                                if hit:
+                                    break
+                            if hit:
+                                boxes.append({"x": gx, "y": gy,
+                                              "w": min(cell, w - gx),
+                                              "h": min(cell, h - gy)})
+            except Exception:
+                pass
+        return VisionResult(ok=True,
+            output=f"changed={changed} regions={len(boxes)} interval={interval}s "
+                   f"sha_a={h1[:12]} sha_b={h2[:12]}",
+            parsed={"changed": changed, "boxes": boxes, "sha256_a": h1,
+                    "sha256_b": h2, "interval_sec": interval,
+                    "shot_a": p1, "shot_b": p2})
+    except Exception as e:
+        return VisionResult(ok=False, error=str(e)[:600])
+
+
 # Module contract
 # ---------------------------------------------------------------------------
 
@@ -767,6 +974,17 @@ TOOL_DEFS: list[tuple] = [
      {"image_a": _S("string", True, "First image"),
       "image_b": _S("string", True, "Second image")},
      "computer", 60),
+    ("ocr_read", "OCR text from image_path (pytesseract); url enables Playwright page-text fallback",
+     {"image_path": _S("string", False, "PNG image to OCR"),
+      "url": _S("string", False, "Page URL for page-text fallback")},
+     "computer", 120),
+    ("multi_monitor_info", "List detected monitors (screeninfo/xrandr/mss); honest headless note",
+     {}, "computer", 30),
+    ("screen_change_detect", "Two screenshots interval apart; changed-region boxes + sha256 diff",
+     {"interval_sec": _S("number", False, "Seconds between shots (default 2)"),
+      "region": _S("object", False, "{x,y,width,height} region to watch")},
+     "computer", 120),
+
 ]
 
 HANDLERS: dict[str, Any] = {
@@ -780,6 +998,10 @@ HANDLERS: dict[str, Any] = {
     "stream_stop": stream_stop,
     "screen_annotate": screen_annotate,
     "visual_verify": visual_verify,
+    "ocr_read": ocr_read,
+    "multi_monitor_info": multi_monitor_info,
+    "screen_change_detect": screen_change_detect,
+
 }
 
 __all__ = ["VisionResult", "TOOL_DEFS", "HANDLERS"]

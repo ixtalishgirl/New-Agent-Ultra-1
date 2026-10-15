@@ -312,6 +312,155 @@ def _service_control(args: dict) -> AppResult:
         return _result_from_exc(e)
 
 
+
+
+def _window_resize_move(args: dict) -> AppResult:
+    """Resize/move an OS window (wmctrl, else xdotool); honest note when headless."""
+    try:
+        name = args.get("name")
+        width = args.get("width")
+        height = args.get("height")
+        x = args.get("x")
+        y = args.get("y")
+        if not name:
+            return AppResult(ok=False, error="name (window title substring) is required")
+        if shutil.which("wmctrl"):
+            r = _run(["wmctrl", "-l"])
+            wid = None
+            for line in r.stdout.splitlines():
+                if name.lower() in line.lower():
+                    wid = line.split()[0]
+                    break
+            if not wid:
+                return AppResult(ok=False, error=f"no window matching '{name}' (wmctrl -l)")
+            parts = [str(x if x is not None else -1), str(y if y is not None else -1),
+                     str(width if width else -1), str(height if height else -1)]
+            rr = _run(["wmctrl", "-i", "-r", wid, "-e", "0," + ",".join(parts)])
+            if rr.returncode != 0:
+                return AppResult(ok=False, error=f"wmctrl move/resize failed: {rr.stderr[:300]}")
+            return AppResult(ok=True, output=f"window {wid} resized/moved",
+                             parsed={"window_id": wid, "x": x, "y": y,
+                                     "width": width, "height": height,
+                                     "backend": "wmctrl"})
+        if shutil.which("xdotool") and os.environ.get("DISPLAY"):
+            r = _run(["xdotool", "search", "--name", name])
+            ids = [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
+            if not ids:
+                return AppResult(ok=False, error=f"no window matching '{name}' (xdotool)")
+            wid = ids[0]
+            if width and height:
+                _run(["xdotool", "windowsize", wid, str(width), str(height)])
+            if x is not None and y is not None:
+                _run(["xdotool", "windowmove", wid, str(x), str(y)])
+            return AppResult(ok=True, output=f"window {wid} resized/moved",
+                             parsed={"window_id": wid, "backend": "xdotool"})
+        return AppResult(ok=False, error=
+            "no window-manager control available (wmctrl/xdotool missing or no DISPLAY); "
+            "headless hosts cannot move OS windows")
+    except Exception as e:
+        return _result_from_exc(e)
+
+
+def _menu_navigate(args: dict) -> AppResult:
+    """Keyboard-driven menu navigation via input_tools (Alt accelerators + arrow keys)."""
+    try:
+        from agent.tools import input_tools  # lazy: avoid import cycles
+        seq = list(args.get("sequence") or [])
+        if not seq:
+            alt = args.get("alt_menu")
+            path = args.get("path", [])
+            if alt:
+                seq.append({"hotkey": ["alt", str(alt)]})
+            for k in path:
+                k = str(k)
+                if k in ("up", "down", "left", "right", "enter", "escape", "tab"):
+                    seq.append({"key": k})
+                else:
+                    seq.append({"type": k})
+        if not seq:
+            return AppResult(ok=False, error="sequence (or alt_menu + path) is required")
+        delay = float(args.get("step_delay", 0.4))
+        steps = []
+        for item in seq:
+            if "hotkey" in item:
+                r = input_tools.key_hotkey({"keys": item["hotkey"]})
+            elif "key" in item:
+                r = input_tools.key_press({"key": item["key"]})
+            elif "type" in item:
+                r = input_tools.key_type({"text": item["type"]})
+            else:
+                return AppResult(ok=False, error=f"bad sequence item: {item}")
+            steps.append({"item": item, "ok": r.ok,
+                          "output": (r.output or r.error or "")[:200]})
+            time.sleep(delay)
+            if not r.ok:
+                return AppResult(ok=False,
+                    error=f"menu step failed at {item}: {r.error}",
+                    parsed={"steps": steps})
+        return AppResult(ok=True,
+            output=f"menu navigation complete ({len(steps)} steps)",
+            parsed={"steps": steps})
+    except Exception as e:
+        return _result_from_exc(e)
+
+
+def _dialog_handle(args: dict) -> AppResult:
+    """Best-effort dialog interaction on the focused window: confirm|cancel|fill."""
+    try:
+        from agent.tools import input_tools  # lazy: avoid import cycles
+        action = str(args.get("action", "confirm")).lower()
+        if action == "confirm":
+            r = input_tools.key_press({"key": "enter"})
+        elif action == "cancel":
+            r = input_tools.key_press({"key": "escape"})
+        elif action == "fill":
+            for _ in range(max(0, int(args.get("tabs", 0)))):
+                input_tools.key_press({"key": "tab"})
+                time.sleep(0.2)
+            r = input_tools.key_type({"text": str(args.get("text", ""))})
+            if r.ok and args.get("submit", True):
+                r = input_tools.key_press({"key": "enter"})
+        else:
+            return AppResult(ok=False, error="action must be confirm|cancel|fill")
+        if not r.ok:
+            return AppResult(ok=False,
+                error=f"dialog action failed (no keyboard backend?): {r.error}",
+                parsed={"action": action})
+        return AppResult(ok=True,
+            output=f"dialog action '{action}' sent (best-effort: acts on the focused window)",
+            parsed={"action": action,
+                    "note": "best-effort; verify visually with screen_shot"})
+    except Exception as e:
+        return _result_from_exc(e)
+
+
+def _editor_control(args: dict) -> AppResult:
+    """Open a file at a line: VS Code CLI if present, else $EDITOR detached, else xdg-open."""
+    try:
+        path = args.get("path")
+        if not path:
+            return AppResult(ok=False, error="path is required")
+        line = max(1, int(args.get("line", 1)))
+        if shutil.which("code"):
+            _run(["code", "--goto", f"{path}:{line}"])
+            backend = "vscode"
+        elif os.environ.get("DISPLAY") and shutil.which("xdg-open"):
+            _run(["xdg-open", path])
+            backend = "xdg-open"
+        else:
+            editor = os.environ.get("EDITOR", "nano")
+            subprocess.Popen([editor, f"+{line}", str(path)],
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+            backend = editor
+        return AppResult(ok=True, output=f"opened {path}:{line} via {backend}",
+                         parsed={"path": path, "line": line, "backend": backend,
+                                 "note": "best-effort on headless hosts"})
+    except Exception as e:
+        return _result_from_exc(e)
+
+
 HANDLERS: dict = {
     "app_launch": _app_launch,
     "app_close": _app_close,
@@ -324,6 +473,11 @@ HANDLERS: dict = {
     "process_kill": _process_kill,
     "process_nice": _process_nice,
     "service_control": _service_control,
+    "window_resize_move": _window_resize_move,
+    "menu_navigate": _menu_navigate,
+    "dialog_handle": _dialog_handle,
+    "editor_control": _editor_control,
+
 }
 
 
@@ -375,4 +529,26 @@ TOOL_DEFS: list[tuple] = [
      {"service": _sch("string", True, "Service name"),
       "action": _sch("string", False, "start|stop|restart|status (default status)")},
      "computer", 60),
+    ("window_resize_move", "Resize/move an OS window (wmctrl/xdotool); honest headless note",
+     {"name": _sch("string", True, "Window title substring"),
+      "width": _sch("integer", False, "Width px"), "height": _sch("integer", False, "Height px"),
+      "x": _sch("integer", False, "X px"), "y": _sch("integer", False, "Y px")},
+     "computer", 30),
+    ("menu_navigate", "Keyboard-driven menu navigation (Alt accelerators + arrow keys)",
+     {"sequence": _sch("array", False, "Steps: {hotkey:[..]} | {key:name} | {type:text}"),
+      "alt_menu": _sch("string", False, "Alt+letter to open a menu"),
+      "path": _sch("array", False, "Keys after the menu opens"),
+      "step_delay": _sch("number", False, "Delay between steps (default 0.4)")},
+     "computer", 120),
+    ("dialog_handle", "Best-effort dialog interaction: confirm|cancel|fill on focused window",
+     {"action": _sch("string", False, "confirm|cancel|fill (default confirm)"),
+      "text": _sch("string", False, "Text for fill"),
+      "tabs": _sch("integer", False, "Tab presses before typing (default 0)"),
+      "submit": _sch("boolean", False, "Press Enter after fill (default true)")},
+     "computer", 60),
+    ("editor_control", "Open a file at a line (VS Code CLI, $EDITOR, or xdg-open)",
+     {"path": _sch("string", True, "File path"),
+      "line": _sch("integer", False, "Line number (default 1)")},
+     "computer", 30),
+
 ]
