@@ -23,7 +23,7 @@ class Task:
     prompt: str
     status: str = "PENDING"  # PENDING, RUNNING, WAITING_FOR_APPROVAL, SUCCEEDED, FAILED, CANCELLED
     events: list = field(default_factory=list)
-    created_at: float = field(default_factory=time.time())
+    created_at: float = field(default_factory=time.time)
     cancelled: bool = False
 
     def log(self, kind: str, **detail):

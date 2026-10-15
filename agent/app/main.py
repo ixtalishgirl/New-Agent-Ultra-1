@@ -1,15 +1,15 @@
-"""Halye autonomous coding agent — main entry point."""
+"""Halye autonomous coding agent — main entry point.
+
+Run as:  python3 -m agent.app.main [task...]   (from the repo root)
+"""
 from __future__ import annotations
 import sys
-import os
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from app.config import load_config
-from model.qwen_adapter import QwenAdapter
-from app.orchestrator import Orchestrator
-from tools.registry import default_registry
-from tools.dispatcher import Dispatcher
+from .config import load_config
+from ..model.qwen_adapter import QwenAdapter
+from .orchestrator import Orchestrator
+from ..tools.registry import default_registry
+from ..tools.dispatcher import Dispatcher
 
 
 def main() -> None:
