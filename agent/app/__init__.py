@@ -8,6 +8,7 @@ from .notifications import (
     get_notifier,
 )
 from .backup import BackupManager, BackupInfo
+from .diagnostics import Diagnostics, CheckResult, CheckStatus
 
 __all__ = [
     "Orchestrator", "AgentResult", "IterationRecord",
@@ -17,4 +18,5 @@ __all__ = [
     "LogChannel", "WebhookChannel", "ConsoleChannel",
     "CallbackChannel", "get_notifier",
     "BackupManager", "BackupInfo",
+    "Diagnostics", "CheckResult", "CheckStatus",
 ]

@@ -234,6 +234,19 @@ def cmd_memory(args) -> int:
     return 0
 
 
+def cmd_diagnose(args) -> int:
+    """Run system diagnostics."""
+    from agent.app.diagnostics import Diagnostics
+    diag = Diagnostics(".")
+    diag.run_all()
+    diag.print_report()
+    if args.fixes:
+        print("\nSuggested fixes:")
+        for s in diag.fix_suggestions():
+            print(f"  - {s}")
+    return 0 if diag.summary()["healthy"] else 1
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -293,6 +306,12 @@ def main(argv: List[str] = None) -> int:
     p = sub.add_parser("memory", help="Memory operations")
     p.add_argument("action", choices=["list", "clear"])
     p.set_defaults(func=cmd_memory)
+
+    # diagnose
+    p = sub.add_parser("diagnose", help="System diagnostics")
+    p.add_argument("--fixes", action="store_true",
+                   help="Show fix suggestions")
+    p.set_defaults(func=cmd_diagnose)
 
     args = parser.parse_args(argv)
     return args.func(args)
