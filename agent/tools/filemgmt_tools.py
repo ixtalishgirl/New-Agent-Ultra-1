@@ -341,7 +341,10 @@ def _file_lock(args: dict) -> FileMgmtResult:
 
 def _trash_restore(args: dict) -> FileMgmtResult:
     try:
-        trash_name = args["trash_name"]
+        trash_name = args.get("trash_name")
+        if not trash_name:
+            return FileMgmtResult(ok=False,
+                                  error="trash_name is required")
         trash_dir = _ensure_trash()
         src = trash_dir / trash_name
         if not src.exists():

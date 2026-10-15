@@ -691,6 +691,164 @@ def _benchmark_run(args: dict) -> CodeResult:
         return CodeResult(ok=False, error=str(e)[:600])
 
 
+
+
+def _build_run(args: dict) -> CodeResult:
+    """Detect build system (make/npm/gradle/cargo) and run the build."""
+    root = Path(str(args.get("root", "."))).expanduser()
+    target = str(args.get("target", ""))
+    timeout = int(args.get("timeout", 600))
+    cmd = None
+    label = ""
+    if (root / "Makefile").exists() or (root / "makefile").exists():
+        cmd, label = ["make"] + ([target] if target else []), "make"
+    elif (root / "package.json").exists():
+        script = target or "build"
+        cmd, label = ["npm", "run", script], "npm"
+    elif (root / "build.gradle").exists() or (root / "build.gradle.kts").exists():
+        cmd, label = ["gradle"] + ([target] if target else ["build"]), "gradle"
+    elif (root / "Cargo.toml").exists():
+        cmd, label = ["cargo", "build"], "cargo"
+    elif (root / "pyproject.toml").exists() or (root / "setup.py").exists():
+        cmd, label = [sys.executable, "-m", "build"], "python-build"
+    if not cmd:
+        return CodeResult(ok=False, error="no recognized build system in " + str(root))
+    if not shutil.which(cmd[0]):
+        return CodeResult(ok=False, error=f"build tool '{cmd[0]}' not installed")
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                           cwd=str(root))
+    except subprocess.TimeoutExpired:
+        return CodeResult(ok=False, error="build timed out")
+    ok = r.returncode == 0
+    out = (r.stdout + r.stderr)[-5000:]
+    logp = root / "build.log"
+    try:
+        logp.write_text(out, encoding="utf-8")
+    except OSError:
+        pass
+    return CodeResult(ok=ok, output=f"[{label}] rc={r.returncode}\n" + out,
+                      parsed={"rc": r.returncode, "system": label, "log": str(logp)})
+
+
+def _compiler_run(args: dict) -> CodeResult:
+    """Compile a source file with the detected compiler (gcc/javac/rustc)."""
+    path = str(args.get("path", ""))
+    output = str(args.get("output", ""))
+    extra = args.get("flags") or []
+    if not path:
+        return CodeResult(ok=False, error="path required")
+    p = Path(path)
+    if not p.exists():
+        return CodeResult(ok=False, error=f"not found: {path}")
+    comp = {"c": "gcc", "cpp": "g++", "cc": "gcc", "java": "javac",
+            "rs": "rustc"}.get(p.suffix.lstrip("."))
+    if not comp:
+        return CodeResult(ok=False, error=f"no compiler mapping for {p.suffix}")
+    if not shutil.which(comp):
+        return CodeResult(ok=False, error=f"compiler '{comp}' not installed")
+    cmd = [comp, str(p)] + list(extra)
+    if output:
+        cmd += ["-o", output]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    except subprocess.TimeoutExpired:
+        return CodeResult(ok=False, error="compile timed out")
+    return CodeResult(ok=r.returncode == 0,
+                      output=(r.stdout + r.stderr)[-3000:] or "compiled ok",
+                      parsed={"rc": r.returncode, "compiler": comp})
+
+
+def _debugger_run(args: dict) -> CodeResult:
+    """Scripted pdb run: breakpoints + commands, non-interactive."""
+    path = str(args.get("path", ""))
+    breakpoints = args.get("breakpoints") or []
+    commands = args.get("commands") or ["c"]
+    timeout = int(args.get("timeout", 120))
+    if not path:
+        return CodeResult(ok=False, error="path required")
+    script = "".join(f"b {b}\n" for b in breakpoints)
+    script += "".join(c + "\n" for c in commands) + "q\n"
+    try:
+        r = subprocess.run([sys.executable, "-m", "pdb", path],
+                           input=script, capture_output=True, text=True,
+                           timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return CodeResult(ok=False, error="debugger run timed out")
+    return CodeResult(ok=True, output=(r.stdout + r.stderr)[-5000:],
+                      parsed={"note": "scripted pdb; for live debugging use an IDE"})
+
+
+def _env_detect(args: dict) -> CodeResult:
+    """Detect OS, python, and key dev tools on PATH."""
+    info = {"os": os.name, "platform": sys.platform,
+            "python": sys.version.split()[0]}
+    try:
+        info["lsb"] = subprocess.run(["lsb_release", "-ds"], capture_output=True,
+                                     text=True, timeout=10).stdout.strip()
+    except Exception:
+        pass
+    for tool in ("git", "gcc", "g++", "javac", "rustc", "node", "npm", "go",
+                 "docker", "kubectl", "terraform", "make", "cmake", "pytest"):
+        info[tool] = shutil.which(tool) or ""
+    info["cpu_count"] = os.cpu_count()
+    return CodeResult(ok=True, output=json.dumps(info, indent=2)[:2000],
+                      parsed=info)
+
+
+def _checkpoint_create(args: dict) -> CodeResult:
+    """Tar snapshot of a workspace dir (excludes .git/__pycache__)."""
+    import tarfile
+    root = Path(str(args.get("root", "."))).expanduser()
+    dest = Path(str(args.get("dest", f"./checkpoint_{int(__import__('time').time())}.tar.gz"))).expanduser()
+    def _filter(ti):
+        if ".git" in ti.name.split("/") or "__pycache__" in ti.name:
+            return None
+        return ti
+    try:
+        with tarfile.open(dest, "w:gz") as tf:
+            tf.add(root, arcname=root.name, filter=_filter)
+    except Exception as e:
+        return CodeResult(ok=False, error=f"checkpoint failed: {e}")
+    return CodeResult(ok=True, output=f"checkpoint -> {dest}",
+                      parsed={"dest": str(dest)})
+
+
+def _checkpoint_restore(args: dict) -> CodeResult:
+    """Restore a tar.gz checkpoint over a directory (with confirm)."""
+    import tarfile
+    path = str(args.get("path", ""))
+    dest = Path(str(args.get("dest", "."))).expanduser()
+    if not path or not Path(path).exists():
+        return CodeResult(ok=False, error="valid path required")
+    if str(args.get("confirm", "")) != "RESTORE":
+        return CodeResult(ok=False,
+                          error="pass confirm='RESTORE' (overwrites files in dest)")
+    try:
+        with tarfile.open(path, "r:gz") as tf:
+            tf.extractall(dest)
+    except Exception as e:
+        return CodeResult(ok=False, error=f"restore failed: {e}")
+    return CodeResult(ok=True, output=f"restored {path} -> {dest}",
+                      parsed={"dest": str(dest)})
+
+
+def _build_log_collect(args: dict) -> CodeResult:
+    """Collect build logs: build.log files + last build_run output."""
+    root = Path(str(args.get("root", "."))).expanduser()
+    tail = int(args.get("tail", 200))
+    chunks = []
+    for logf in list(root.rglob("build.log"))[:5]:
+        try:
+            lines = logf.read_text(encoding="utf-8", errors="replace").splitlines()
+            chunks.append(f"== {logf} ==\n" + "\n".join(lines[-tail:]))
+        except Exception:
+            pass
+    return CodeResult(ok=True,
+                      output="\n\n".join(chunks)[:6000] or "no build.log files found",
+                      parsed={"logs": len(chunks)})
+
+
 HANDLERS: dict = {
     "git_clone": _git_clone,
     "git_pull": _git_pull,
@@ -709,6 +867,13 @@ HANDLERS: dict = {
     "error_log_read": _error_log_read,
     "tool_version": _tool_version,
     "benchmark_run": _benchmark_run,
+    "build_run": _build_run,
+    "compiler_run": _compiler_run,
+    "debugger_run": _debugger_run,
+    "env_detect": _env_detect,
+    "checkpoint_create": _checkpoint_create,
+    "checkpoint_restore": _checkpoint_restore,
+    "build_log_collect": _build_log_collect,
 
 }
 
@@ -792,5 +957,38 @@ TOOL_DEFS: list[tuple] = [
       "args": _sch("object", False, "Args per run"),
       "times": _sch("integer", False, "Runs 1-50 (default 5)")},
      "computer", 600),
+
+    ("build_run", "Detect build system and run the build (log to build.log)",
+     {"root": _sch("string", False, "Project root"),
+      "target": _sch("string", False, "Target/script"),
+      "timeout": _sch("integer", False, "Seconds")},
+     "computer", 900),
+    ("compiler_run", "Compile a file with gcc/g++/javac/rustc",
+     {"path": _sch("string", True, "Source file"),
+      "output": _sch("string", False, "Output binary"),
+      "flags": _sch("array", False, "Extra flags")},
+     "computer", 300),
+    ("debugger_run", "Scripted non-interactive pdb run",
+     {"path": _sch("string", True, "Python script"),
+      "breakpoints": _sch("array", False, "Line numbers"),
+      "commands": _sch("array", False, "pdb commands"),
+      "timeout": _sch("integer", False, "Seconds")},
+     "computer", 300),
+    ("env_detect", "Detect OS, python, and dev tools on PATH",
+     {},
+     "computer", 30),
+    ("checkpoint_create", "Tar.gz snapshot of a workspace dir",
+     {"root": _sch("string", False, "Dir"),
+      "dest": _sch("string", False, "Output .tar.gz")},
+     "computer", 600),
+    ("checkpoint_restore", "Restore a checkpoint (confirm='RESTORE')",
+     {"path": _sch("string", True, "Checkpoint .tar.gz"),
+      "dest": _sch("string", False, "Destination dir"),
+      "confirm": _sch("string", True, "Must be RESTORE")},
+     "computer", 600),
+    ("build_log_collect", "Collect build.log files under a root",
+     {"root": _sch("string", False, "Root"),
+      "tail": _sch("integer", False, "Lines per log")},
+     "computer", 60),
 
 ]

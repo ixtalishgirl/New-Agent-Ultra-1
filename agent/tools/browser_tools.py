@@ -941,6 +941,17 @@ def browser_scroll(args: dict) -> BrowserResult:
     return r
 
 
+def cross_browser_note(args: dict) -> BrowserResult:
+    """Honest cross-browser validation guidance."""
+    return BrowserResult(ok=True,
+        output=("Cross-browser validation: this agent drives Chromium via "
+                "Playwright. For Firefox/WebKit, install them "
+                "(`playwright install firefox webkit`) and rerun the same "
+                "browser_* flows; compare screenshots with visual_verify. "
+                "No multi-engine grid is running here."),
+        parsed={"guidance": True})
+
+
 # Module contract
 # ---------------------------------------------------------------------------
 
@@ -1039,6 +1050,9 @@ TOOL_DEFS: list[tuple] = [
       "selector": _S("string", False, "CSS selector to scroll instead of page")},
      "computer", 60),
 
+    ("cross_browser_note", "Honest cross-browser validation guidance",
+     {}, "computer", 10),
+
 ]
 
 HANDLERS: dict[str, Any] = {
@@ -1070,6 +1084,7 @@ HANDLERS: dict[str, Any] = {
     "browser_launch": browser_launch,
     "browser_close": browser_close,
     "browser_scroll": browser_scroll,
+    "cross_browser_note": cross_browser_note,
 
 }
 

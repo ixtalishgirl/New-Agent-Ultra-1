@@ -228,17 +228,26 @@ class Dispatcher:
         except Exception as e:
             return DispatchResult(ok=False, output=f"Execution error: {e}")
 
+    @staticmethod
+    def _exec_result(r) -> "DispatchResult":
+        out = (f"exit={r.exit_code} duration_ms={r.duration_ms}\n"
+               f"STDOUT:\n{r.stdout}\nSTDERR:\n{r.stderr}")
+        return DispatchResult(ok=r.ok, output=out)
+
     def _execute(self, name: str, args: dict, timeout: int) -> DispatchResult:
         if name == "shell":
             r: ExecResult = run_shell(str(args.get("command", "")),
                                       timeout=timeout,
                                       workspace=self.workspace)
+            return self._exec_result(r)
         elif name == "python":
             r = run_python(str(args.get("code", "")),
                            timeout=timeout, workspace=self.workspace)
+            return self._exec_result(r)
         elif name == "pip":
             r = run_shell(f"pip install {args.get('package', '')}",
                           timeout=timeout, workspace=self.workspace)
+            return self._exec_result(r)
         elif name == "file_read":
             return self._file_read(str(args.get("path", "")))
         elif name == "file_write":
@@ -376,8 +385,6 @@ class Dispatcher:
         except Exception as e:
             return DispatchResult(
                 ok=False, output=f"Computer-control tool error: {e}")
-        out = f"exit={r.exit_code} duration_ms={r.duration_ms}\nSTDOUT:\n{r.stdout}\nSTDERR:\n{r.stderr}"
-        return DispatchResult(ok=r.ok, output=out)
 
     def _git_branch(self, args: dict) -> DispatchResult:
         """git_branch dispatcher: action=list|create|delete|checkout."""

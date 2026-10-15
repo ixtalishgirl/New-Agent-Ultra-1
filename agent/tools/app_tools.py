@@ -274,6 +274,9 @@ def _process_kill(args: dict) -> AppResult:
 
 def _process_nice(args: dict) -> AppResult:
     try:
+        if args.get("pid") is None or args.get("nice") is None:
+            return AppResult(ok=False,
+                             error="pid and nice are required")
         pid = int(args["pid"])
         nice = int(args["nice"])
         try:
@@ -449,6 +452,10 @@ def _editor_control(args: dict) -> AppResult:
             backend = "xdg-open"
         else:
             editor = os.environ.get("EDITOR", "nano")
+            if not shutil.which(editor):
+                return AppResult(ok=False,
+                                 error=f"editor '{editor}' not installed "
+                                       f"(and no DISPLAY/code CLI); set $EDITOR")
             subprocess.Popen([editor, f"+{line}", str(path)],
                              stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL,

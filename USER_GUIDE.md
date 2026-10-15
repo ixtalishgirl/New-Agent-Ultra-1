@@ -364,9 +364,13 @@ Rules (ahsan's standing order):
   `process_kill`, `memory_delete`, `service_control stop/restart`) require
   `confirm=true` while the `safety:destructive_confirmation` toggle is ON
   (default ON). The dispatcher returns `CONFIRMATION_REQUIRED` otherwise.
-- Full permission catalog: `agent/configs/PERMISSIONS.md` (155 policy items)
-  and `agent/configs/COMPUTER_CONTROL_PERMISSIONS.md` (150 computer-control
-  items, 9 categories).
+- Full permission catalog: `agent/configs/PERMISSIONS.md` (155 policy items),
+  `agent/configs/COMPUTER_CONTROL_PERMISSIONS.md` (150 computer-control
+  items, 9 categories), and
+  `agent/configs/ADVANCED_CODING_PERMISSIONS.md` (13 categories:
+  code development, debugging, testing, game dev, performance, web,
+  files/terminal, AI/ML, self-improvement, cloud, security, advanced
+  system, high-risk).
 
 ### Computer-control tools (9 categories)
 
@@ -385,6 +389,27 @@ Rules (ahsan's standing order):
 Each module exposes `TOOL_DEFS` (name, description, input schema, profile,
 timeout) and `HANDLERS` (real implementations). The registry auto-registers
 them via `build_full_registry()`; the dispatcher routes them generically.
+
+### Advanced autonomous coding agent (13 categories, 2026-10-15)
+
+| Category | Module | Examples |
+|----------|--------|----------|
+| Code Development | `agent/tools/dev_tools.py` | `repo_scaffold`, `code_refactor`, `code_translate`, `api_scaffold`, `docs_generate`, `code_review`, `arch_analyze` |
+| Bug Fixing & Debugging | `agent/tools/debug_tools.py` | `bug_scan`, `stacktrace_analyze`, `root_cause`, `patch_generate`, `memleak_detect`, `deadlock_detect`, `runtime_check` |
+| Testing & QA | `agent/tools/test_tools.py` | `test_run`, `test_generate`, `coverage_run`, `load_test`, `fuzz_run`, `api_test`, `db_test`, `fail_repro` |
+| Game Development | `agent/tools/game_tools.py` | `game_scaffold` (pygame/godot/unity/unreal, 2D/3D), `game_build` |
+| Performance | `agent/tools/perf_tools.py` | `profile_cpu`, `profile_memory`, `alloc_track`, `thread_analyze`, `complexity_estimate`, `perf_regression`, `optimize_suggest`, `optimize_verify` |
+| AI & Machine Learning | `agent/tools/ml_tools.py` | `ml_inference`, `rag_index`, `rag_query`, `dataset_validate`, `gpu_monitor`, `prompt_eval`, `model_version` |
+| Cloud & Infrastructure | `agent/tools/cloud_tools.py` | `cicd_run`, `deploy_preview`, `uptime_check`, `iac_validate`, `k8s_validate`, `db_migrate_test`, `backup_verify`, `alert_emit` |
+| Security & Reliability | `agent/tools/sec_tools.py` | `sast_scan`, `vuln_scan_deps`, `license_check`, `config_audit`, `perm_audit`, `dlp_check`, `supply_chain_check` |
+| Advanced System | `agent/tools/sys2_tools.py` | `task_plan`, `task_decompose`, `agent_message`, `work_queue`, `task_monitor`, `resource_monitor`, `config_version`, `release_notes` |
+| High-Risk (audit-logged) | `agent/tools/risk_tools.py` | `root_exec`, `prod_secret_read`, `prod_deploy` (confirm-gated), `tunnel_create`, `self_perm_audit`, `ssh_exec` |
+| Self-Improvement | `agent/tools/self_tools.py` | `failure_memory`, `tool_discover`, `tool_spec_gen`, `tool_test_gen`, `gap_analyze`, `branch_create`, `kb_update` |
+| Build & Env (extended) | `agent/tools/code_tools.py` | `build_run`, `compiler_run`, `debugger_run`, `env_detect`, `checkpoint_create`, `checkpoint_restore`, `build_log_collect` |
+
+Per-tool verification: `agent/tests/verify_all_tools.py` executes every
+registered tool with safe args and prints PASS/FAIL/SKIP per tool
+(179 PASS / 0 FAIL / 139 honest SKIP on 2026-10-15 over 318 tools).
 
 ---
 

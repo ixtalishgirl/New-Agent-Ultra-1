@@ -552,8 +552,9 @@ def stream_stop(args: dict) -> VisionResult:
         with _STREAMS_LOCK:
             entry = _STREAMS.pop(port, None)
         if not entry:
-            return VisionResult(ok=False, error=
-                f"no stream running on port {port}")
+            return VisionResult(ok=True,
+                output=f"no stream running on port {port} (nothing to stop)",
+                parsed={"port": port, "stopped": False, "noop": True})
         entry["stop"].set()
         try:
             entry["server"].shutdown()
@@ -924,6 +925,35 @@ def screen_change_detect(args: dict) -> VisionResult:
         return VisionResult(ok=False, error=str(e)[:600])
 
 
+def screenshot_analyze(args: dict) -> VisionResult:
+    """Combined screenshot + OCR + UI element list for a URL or screen."""
+    url = args.get("url")
+    image_path = args.get("image_path")
+    parts: dict = {}
+    # 1. screenshot
+    shot = screen_shot({"output": args.get("output") or ""})
+    parts["screenshot"] = {"ok": shot.ok,
+                           "output": (shot.output or shot.error)[:500]}
+    # 2. OCR on the captured image (if any path known)
+    ocr_text = ""
+    if shot.ok:
+        m = __import__("re").search(r"(/[^\s]+\.png)", shot.output or "")
+        img = image_path or (m.group(1) if m else None)
+        if img:
+            r = ocr_read({"image_path": img})
+            ocr_text = (r.output or "")[:2000]
+            parts["ocr"] = {"ok": r.ok, "text": ocr_text[:500]}
+    # 3. UI elements when a URL is given
+    if url:
+        r = ui_element_detect({"url": url, "max_results": 100})
+        parts["elements"] = {"ok": r.ok,
+                             "output": (r.output or r.error)[:2000]}
+    summary = (f"screenshot_ok={parts['screenshot']['ok']} "
+               f"ocr_chars={len(ocr_text)} "
+               f"elements={'n/a' if 'elements' not in parts else parts['elements']['ok']}")
+    return VisionResult(ok=shot.ok, output=summary, parsed=parts)
+
+
 # Module contract
 # ---------------------------------------------------------------------------
 
@@ -984,6 +1014,11 @@ TOOL_DEFS: list[tuple] = [
      {"interval_sec": _S("number", False, "Seconds between shots (default 2)"),
       "region": _S("object", False, "{x,y,width,height} region to watch")},
      "computer", 120),
+    ("screenshot_analyze", "Screenshot + OCR + UI element list, combined",
+     {"url": _S("string", False, "Page URL (for element list)"),
+      "image_path": _S("string", False, "Or analyze an existing image"),
+      "output": _S("string", False, "Optional PNG output path")},
+     "computer", 120),
 
 ]
 
@@ -1001,6 +1036,7 @@ HANDLERS: dict[str, Any] = {
     "ocr_read": ocr_read,
     "multi_monitor_info": multi_monitor_info,
     "screen_change_detect": screen_change_detect,
+    "screenshot_analyze": screenshot_analyze,
 
 }
 

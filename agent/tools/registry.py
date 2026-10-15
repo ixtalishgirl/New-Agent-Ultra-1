@@ -78,6 +78,17 @@ _COMPUTER_CONTROL_MODULES = [
     "agent.tools.code_tools",      # Coding & Tool Creation extensions
     "agent.tools.memory_tools",    # Memory & Automation
     "agent.tools.safety_tools",    # Access & Safety Controls
+    "agent.tools.dev_tools",       # Code Development (advanced)
+    "agent.tools.debug_tools",     # Bug Fixing & Debugging
+    "agent.tools.test_tools",      # Testing & QA
+    "agent.tools.game_tools",      # Game Development
+    "agent.tools.perf_tools",      # Advanced Debugging & Performance
+    "agent.tools.ml_tools",        # AI & Machine Learning
+    "agent.tools.cloud_tools",     # Cloud & Infrastructure
+    "agent.tools.sec_tools",       # Security & Reliability
+    "agent.tools.sys2_tools",      # Advanced System Capabilities
+    "agent.tools.risk_tools",      # High-Risk (default ON, audit-logged)
+    "agent.tools.self_tools",      # Self-Improvement & Tool Creation
 ]
 
 
