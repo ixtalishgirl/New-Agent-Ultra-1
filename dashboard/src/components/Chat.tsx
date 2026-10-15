@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { api, ApiError } from "../api/client";
 import { addEntry } from "../store/history";
 import type { ConnState } from "./Connection";
@@ -12,6 +13,30 @@ interface Msg {
 
 function fmtTime(t: number) {
   return new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+// Render markdown images with data: URIs as real <img> tags so screenshots
+// sent by the agent display inline. Other text renders as-is.
+function renderRich(text: string, keyPrefix: string) {
+  const re = /!\[([^\]]*)\]\((data:image\/[a-zA-Z+]+;base64,[A-Za-z0-9+/=]+)\)/g;
+  const parts: ReactNode[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let k = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(<span key={`${keyPrefix}-t${k++}`}>{text.slice(last, m.index)}</span>);
+    parts.push(
+      <img
+        key={`${keyPrefix}-i${k++}`}
+        src={m[2]}
+        alt={m[1] || "screenshot"}
+        style={{ maxWidth: "100%", borderRadius: 8, margin: "8px 0", border: "1px solid #333" }}
+      />
+    );
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push(<span key={`${keyPrefix}-t${k++}`}>{text.slice(last)}</span>);
+  return parts.length > 0 ? parts : text;
 }
 
 export default function Chat({ conn }: { conn: ConnState }) {
@@ -68,10 +93,15 @@ export default function Chat({ conn }: { conn: ConnState }) {
         )}
         {msgs.map((m, i) => (
           <div key={i} className={`msg ${m.role}`}>
-            <div className="meta">
-              {m.role === "user" ? "You" : m.role === "agent" ? "Agent" : "Error"} · {fmtTime(m.time)}
+            <div className="msg-head">
+              <span className={`avatar ${m.role}`}>
+                {m.role === "user" ? "Y" : m.role === "agent" ? "A" : "!"}
+              </span>
+              <span className="meta">
+                {m.role === "user" ? "You" : m.role === "agent" ? "Agent" : "Error"} · {fmtTime(m.time)}
+              </span>
             </div>
-            <div>{m.text}</div>
+            <div className="msg-body">{renderRich(m.text, `m${i}`)}</div>
             {m.toolCalls && m.toolCalls.length > 0 && (
               <details className="toolcalls">
                 <summary>{m.toolCalls.length} tool call(s)</summary>
@@ -80,7 +110,14 @@ export default function Chat({ conn }: { conn: ConnState }) {
             )}
           </div>
         ))}
-        {busy && <div className="typing">Agent working</div>}
+        {busy && (
+          <div className="typing">
+            <span className="tdot" />
+            <span className="tdot" />
+            <span className="tdot" />
+            <span style={{ marginLeft: 8 }}>Agent working</span>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
       <div className="chat-input">

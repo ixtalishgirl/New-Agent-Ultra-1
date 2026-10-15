@@ -5,16 +5,35 @@ import ToolRegistry from "./components/ToolRegistry";
 import Approvals from "./components/Approvals";
 import History from "./components/History";
 import Config from "./components/Config";
+import FileManager from "./components/FileManager";
+import LiveBrowser from "./components/LiveBrowser";
+import Workflows from "./components/Workflows";
+import Permissions from "./components/Permissions";
 import { ConnectionPill, useConnection, type ConnState } from "./components/Connection";
 import { getApprovals, subscribe } from "./store/history";
+import { applyTheme } from "./api/client";
 import "./styles.css";
 
-type Tab = "chat" | "tasks" | "tools" | "approvals" | "history" | "config";
+type Tab =
+  | "chat"
+  | "tasks"
+  | "tools"
+  | "approvals"
+  | "history"
+  | "config"
+  | "files"
+  | "browser"
+  | "automate"
+  | "permissions";
 
 const TABS: Array<{ id: Tab; label: string; icon: string }> = [
   { id: "chat", label: "Chat", icon: "💬" },
   { id: "tasks", label: "Tasks", icon: "📊" },
   { id: "tools", label: "Tools", icon: "🧰" },
+  { id: "files", label: "Files", icon: "📁" },
+  { id: "browser", label: "Browser", icon: "🌐" },
+  { id: "automate", label: "Automate", icon: "⚡" },
+  { id: "permissions", label: "Permissions", icon: "🔑" },
   { id: "approvals", label: "Approvals", icon: "✅" },
   { id: "history", label: "History", icon: "🕘" },
   { id: "config", label: "Settings", icon: "⚙️" },
@@ -24,6 +43,10 @@ const TITLES: Record<Tab, string> = {
   chat: "Agent Chat",
   tasks: "Task Monitor",
   tools: "Tool Registry",
+  files: "File Manager",
+  browser: "Live Browser",
+  automate: "Automation",
+  permissions: "Permissions",
   approvals: "Approvals",
   history: "Execution History",
   config: "Configuration",
@@ -42,6 +65,11 @@ export default function App() {
       }),
     []
   );
+
+  // apply saved accent theme on load
+  useEffect(() => {
+    applyTheme();
+  }, []);
 
   // refresh once when settings saved
   const reconnect = () => {
@@ -83,9 +111,13 @@ export default function App() {
           {tab === "chat" && <Chat conn={state as ConnState} />}
           {tab === "tasks" && <TaskMonitor conn={state as ConnState} />}
           {tab === "tools" && <ToolRegistry conn={state as ConnState} onApproval={() => setTab("approvals")} />}
+          {tab === "files" && <FileManager conn={state as ConnState} />}
+          {tab === "browser" && <LiveBrowser conn={state as ConnState} />}
+          {tab === "automate" && <Workflows conn={state as ConnState} />}
+          {tab === "permissions" && <Permissions conn={state as ConnState} />}
           {tab === "approvals" && <Approvals />}
           {tab === "history" && <History />}
-          {tab === "config" && <Config onSaved={reconnect} />}
+          {tab === "config" && <Config onSaved={reconnect} conn={state as ConnState} />}
         </div>
       </div>
     </div>
