@@ -2,9 +2,19 @@
 from .orchestrator import Orchestrator, AgentResult, IterationRecord
 from .event_bus import EventBus, Event, EventType, get_bus, reset_bus
 from .scheduler import Scheduler, ScheduledTask, ScheduleType
+from .notifications import (
+    NotificationManager, Notification, Severity,
+    LogChannel, WebhookChannel, ConsoleChannel, CallbackChannel,
+    get_notifier,
+)
+from .backup import BackupManager, BackupInfo
 
 __all__ = [
     "Orchestrator", "AgentResult", "IterationRecord",
     "EventBus", "Event", "EventType", "get_bus", "reset_bus",
     "Scheduler", "ScheduledTask", "ScheduleType",
+    "NotificationManager", "Notification", "Severity",
+    "LogChannel", "WebhookChannel", "ConsoleChannel",
+    "CallbackChannel", "get_notifier",
+    "BackupManager", "BackupInfo",
 ]
