@@ -246,6 +246,19 @@ class Handler(BaseHTTPRequestHandler):
 def run(port: int | None = None):
     port = port or int(os.environ.get("PORT", "8000"))
     Handler.orchestrator = None  # lazy init per request
+    # Start Tor in the background for onion browsing (best effort).
+    try:
+        import threading
+
+        def _tor():
+            try:
+                from agent.browser.tor_manager import ensure_tor
+            except ImportError:
+                from browser.tor_manager import ensure_tor  # type: ignore
+            ensure_tor()
+        threading.Thread(target=_tor, daemon=True).start()
+    except Exception:
+        pass
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     server.daemon_threads = True
     print(f"Haley agent API on :{port}", flush=True)

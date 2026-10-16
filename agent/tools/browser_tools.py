@@ -1364,6 +1364,77 @@ def browser_launch(args: dict) -> BrowserResult:
         return BrowserResult(ok=False, error=str(e)[:600])
 
 
+def _tor_mgr():
+    try:
+        from agent.browser.tor_manager import ensure_tor, tor_status, tor_running
+        return ensure_tor, tor_status, tor_running
+    except ImportError:
+        from browser.tor_manager import ensure_tor, tor_status, tor_running  # type: ignore
+        return ensure_tor, tor_status, tor_running
+
+
+def tor_status_tool(args: dict) -> BrowserResult:
+    """Check Tor SOCKS proxy status."""
+    try:
+        _, tor_status, _ = _tor_mgr()
+        st = tor_status()
+        return BrowserResult(ok=True, output=json.dumps(st),
+                             parsed=st)
+    except Exception as e:
+        return BrowserResult(ok=False, error=str(e)[:300])
+
+
+def tor_start(args: dict) -> BrowserResult:
+    """Start Tor SOCKS proxy on 127.0.0.1:9050 (self-healing download if needed)."""
+    try:
+        ensure_tor, tor_status, _ = _tor_mgr()
+        ok, msg = ensure_tor()
+        st = tor_status()
+        return BrowserResult(ok=ok, output=msg, parsed=st)
+    except Exception as e:
+        return BrowserResult(ok=False, error=str(e)[:300])
+
+
+def tor_browse(args: dict) -> BrowserResult:
+    """Browse a .onion URL through Tor. Returns screenshot + page text.
+    args: {url: str}. Tor is auto-started if needed."""
+    url = (args.get("url") or "").strip()
+    if not url:
+        return BrowserResult(ok=False, error="url is required")
+    if ".onion" not in url:
+        return BrowserResult(ok=False, error="tor_browse is for .onion URLs only")
+    try:
+        ensure_tor, _, tor_running = _tor_mgr()
+        ok, msg = ensure_tor()
+        if not ok:
+            return BrowserResult(ok=False, error="tor not available: " + msg)
+        # One-shot Tor browser (separate from the main daemon).
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox"],
+                proxy={"server": "socks5://127.0.0.1:9050"})
+            try:
+                page = browser.new_page()
+                page.goto(url, timeout=60000, wait_until="domcontentloaded")
+                page.wait_for_timeout(2000)
+                title = page.title()
+                text = page.inner_text("body")[:5000]
+                shot = page.screenshot()
+                import base64
+                data_uri = ("data:image/png;base64," +
+                            base64.b64encode(shot).decode())
+            finally:
+                browser.close()
+        return BrowserResult(ok=True,
+                             output=f"tor browse OK: {title[:100]}",
+                             parsed={"url": url, "title": title,
+                                     "text": text, "data_uri": data_uri})
+    except Exception as e:
+        return BrowserResult(ok=False, error=str(e)[:500])
+
+
 def browser_close(args: dict) -> BrowserResult:
     """Stop the managed browser daemon (SIGTERM, SIGKILL fallback); clean state files."""
     try:
@@ -1516,6 +1587,12 @@ TOOL_DEFS: list[tuple] = [
      {}, "computer", 60),
     ("browser_login_restore", "Restore saved logins (cookies) from cloud backup.",
      {}, "computer", 60),
+    ("tor_status", "Check Tor SOCKS proxy status.",
+     {}, "network", 30),
+    ("tor_start", "Start Tor SOCKS proxy on 127.0.0.1:9050.",
+     {}, "network", 60),
+    ("tor_browse", "Browse a .onion URL through Tor. Returns screenshot + text.",
+     {"url": _S("string", True, ".onion URL")}, "network", 120),
     ("browser_storage", "Get/set/clear local|session storage (clear needs confirm)",
      {**_TAB, "action": _S("string", False, "get|set|clear (default get)"),
       "type": _S("string", False, "local|session (default local)"),
@@ -1572,6 +1649,9 @@ HANDLERS: dict[str, Any] = {
     "browser_cookies": browser_cookies,
     "browser_login_save": browser_login_save,
     "browser_login_restore": browser_login_restore,
+    "tor_status": tor_status_tool,
+    "tor_start": tor_start,
+    "tor_browse": tor_browse,
     "browser_storage": browser_storage,
     "browser_viewport": browser_viewport,
     "browser_ua": browser_ua,
