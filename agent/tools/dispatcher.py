@@ -267,6 +267,10 @@ class Dispatcher:
             # One-shot form fill + submit (no daemon needed).
             return self._browser_form(args)
         elif name == "browser_click":
+            # Session click (no url) -> daemon version via registry handlers;
+            # one-shot click (with url) -> legacy path.
+            if not args.get("url"):
+                return self._computer_control(name, args)
             return self._browser_click(args)
         elif name == "tool_create":
             return self._tool_create(args)
