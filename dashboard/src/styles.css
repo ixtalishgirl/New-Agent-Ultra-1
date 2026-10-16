@@ -152,6 +152,28 @@ button.btn.small { padding: 6px 12px; font-size: 12px; }
   font-size: 18px; padding: 0 16px;
   display: inline-flex; align-items: center; justify-content: center;
 }
+.chat-input .attach-btn {
+  min-width: 52px; height: 52px; border-radius: 16px;
+  font-size: 26px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.img-preview {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 10px 4px 0;
+}
+.img-preview img {
+  max-height: 110px; max-width: 180px; border-radius: 10px;
+  border: 1px solid var(--border);
+}
+.img-remove {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: rgba(24, 32, 47, 0.9); color: var(--text);
+  border: 1px solid var(--border); cursor: pointer; font-size: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.img-remove:hover { border-color: var(--red); color: var(--red); }
 .typing { color: var(--muted); font-size: 12px; padding: 6px 2px; }
 .typing::after { content: "…"; animation: blink 1s infinite; }
 @keyframes blink { 50% { opacity: 0.2; } }

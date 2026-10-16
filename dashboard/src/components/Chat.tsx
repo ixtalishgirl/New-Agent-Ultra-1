@@ -49,14 +49,51 @@ function renderRich(text: string, keyPrefix: string) {
   return parts.length > 0 ? parts : text;
 }
 
+// Downscale an image file to a compact JPEG data URI (max 1024px) so the
+// chat payload stays small. Falls back to the raw data URI on any error.
+function fileToDataUri(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("read failed"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("decode failed"));
+      img.onload = () => {
+        try {
+          const MAX = 1024;
+          const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+          const w = Math.max(1, Math.round(img.width * scale));
+          const h = Math.max(1, Math.round(img.height * scale));
+          const canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) {
+            resolve(reader.result as string);
+            return;
+          }
+          ctx.drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL("image/jpeg", 0.85));
+        } catch {
+          resolve(reader.result as string);
+        }
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function Chat({ conn }: { conn: ConnState }) {
   const [sessions, setSessions] = useState(listSessions);
   const [activeId, setActiveId] = useState<string | null>(() => listSessions()[0]?.id ?? null);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [drawer, setDrawer] = useState(false);
+  const [image, setImage] = useState<string | null>(null); // attached image data URI
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   // auto-grow the message box as the user types
   useEffect(() => {
@@ -112,7 +149,7 @@ export default function Chat({ conn }: { conn: ConnState }) {
 
   const send = async () => {
     const prompt = input.trim();
-    if (!prompt || busy) return;
+    if ((!prompt && !image) || busy) return;
     let sid = activeId;
     if (!sid) {
       sid = createSession().id;
@@ -125,16 +162,24 @@ export default function Chat({ conn }: { conn: ConnState }) {
     }
     const sess = getSession(sid);
     const isFirst = (sess?.messages.length ?? 0) === 0;
+    // Embed the attached image as markdown so it renders inline in history
+    // and reaches the agent as part of the prompt text.
+    const fullPrompt = image
+      ? (prompt ? `${prompt}\n\n![attached image](${image})` : `![attached image](${image})`)
+      : prompt;
+    const titleSeed = prompt || "Image";
     setInput("");
-    const withUser: ChatMsg[] = [...(sess?.messages ?? []), { role: "user", text: prompt, time: Date.now() }];
+    setImage(null);
+    if (fileRef.current) fileRef.current.value = "";
+    const withUser: ChatMsg[] = [...(sess?.messages ?? []), { role: "user", text: fullPrompt, time: Date.now() }];
     pushMsgs(sid, withUser);
     if (isFirst) {
-      autoNameSession(sid, prompt); // the agent names the chat itself
+      autoNameSession(sid, titleSeed); // the agent names the chat itself
       setSessions(listSessions());
     }
     setBusy(true);
     try {
-      const res = await api.chat(prompt);
+      const res = await api.chat(fullPrompt);
       // The backend returns {success, final_text, iterations, ...} —
       // show ONLY her words, never the raw technical wrapper.
       const reply =
@@ -148,17 +193,36 @@ export default function Chat({ conn }: { conn: ConnState }) {
       addEntry({
         kind: "chat",
         status: res.success === false ? "error" : "ok",
-        title: prompt.slice(0, 80),
+        title: titleSeed.slice(0, 80),
         detail: `reply ${String(reply).length} chars · ${toolCalls.length} tool call(s)`,
       });
     } catch (e) {
       const msg = e instanceof ApiError ? e.message : "Request failed";
       const cur = getSession(sid)?.messages ?? withUser;
       pushMsgs(sid, [...cur, { role: "error", text: msg, time: Date.now() }]);
-      addEntry({ kind: "chat", status: "error", title: prompt.slice(0, 80), detail: msg });
+      addEntry({ kind: "chat", status: "error", title: titleSeed.slice(0, 80), detail: msg });
     } finally {
       setBusy(false);
     }
+  };
+
+  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (!f.type.startsWith("image/")) {
+      if (fileRef.current) fileRef.current.value = "";
+      return;
+    }
+    try {
+      setImage(await fileToDataUri(f));
+    } catch {
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  const clearImage = () => {
+    setImage(null);
+    if (fileRef.current) fileRef.current.value = "";
   };
 
   return (
@@ -241,7 +305,30 @@ export default function Chat({ conn }: { conn: ConnState }) {
         )}
         <div ref={bottomRef} />
       </div>
+      {image && (
+        <div className="img-preview">
+          <img src={image} alt="attached" />
+          <button className="img-remove" onClick={clearImage} title="Remove image">
+            ✕
+          </button>
+        </div>
+      )}
       <div className="chat-input">
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          style={{ display: "none" }}
+          onChange={onFile}
+        />
+        <button
+          className="btn attach-btn"
+          onClick={() => fileRef.current?.click()}
+          disabled={busy}
+          title="Attach image"
+        >
+          📎
+        </button>
         <textarea
           ref={inputRef}
           value={input}
@@ -256,7 +343,7 @@ export default function Chat({ conn }: { conn: ConnState }) {
           disabled={busy}
           rows={1}
         />
-        <button className="btn send-btn" onClick={send} disabled={busy || !input.trim()} title="Bhejo">
+        <button className="btn send-btn" onClick={send} disabled={busy || (!input.trim() && !image)} title="Bhejo">
           ➤
         </button>
       </div>
