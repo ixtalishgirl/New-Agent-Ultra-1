@@ -1408,23 +1408,30 @@ def tor_browse(args: dict) -> BrowserResult:
         ok, msg = ensure_tor()
         if not ok:
             return BrowserResult(ok=False, error="tor not available: " + msg)
-        # One-shot Tor browser (separate from the main daemon).
+        # Use the existing browser daemon via CDP, with a Tor-proxied context.
         from playwright.sync_api import sync_playwright
+        port, err = _ensure_daemon()
+        if port is None:
+            return BrowserResult(ok=False, error="browser daemon: " + str(err))
         with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox"],
-                proxy={"server": "socks5://127.0.0.1:9050"})
+            browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
             try:
-                page = browser.new_page()
-                page.goto(url, timeout=60000, wait_until="domcontentloaded")
-                page.wait_for_timeout(2000)
-                title = page.title()
-                text = page.inner_text("body")[:5000]
-                shot = page.screenshot()
-                import base64
-                data_uri = ("data:image/png;base64," +
-                            base64.b64encode(shot).decode())
+                # New isolated context routed through Tor SOCKS proxy.
+                ctx = browser.new_context(
+                    proxy={"server": "socks5://127.0.0.1:9050"})
+                try:
+                    page = ctx.new_page()
+                    page.goto(url, timeout=60000,
+                              wait_until="domcontentloaded")
+                    page.wait_for_timeout(3000)
+                    title = page.title()
+                    text = page.inner_text("body")[:5000]
+                    shot = page.screenshot()
+                    import base64
+                    data_uri = ("data:image/png;base64," +
+                                base64.b64encode(shot).decode())
+                finally:
+                    ctx.close()
             finally:
                 browser.close()
         return BrowserResult(ok=True,
