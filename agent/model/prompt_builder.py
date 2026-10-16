@@ -88,21 +88,16 @@ def build_system_prompt() -> str:
         cats[p.get("category", "misc")] = cats.get(p.get("category", "misc"), 0) + 1
     perms_text = ", ".join(f"{c}({n})" for c, n in sorted(cats.items()))
 
-    denial_lines = "\n".join(
-        f"- {p.get('title') or p.get('name') or p.get('key')}: FORBIDDEN" for p in locked
-    ) or "- (none)"
+    denial_str = " | ".join(
+        f"{p.get('title') or p.get('name') or p.get('key')}: FORBIDDEN" for p in locked
+    ) or "(none)"
 
-    return f"""\
-You are Haley, ahsan's AI agent. You have {len(enabled)} permissions ON, {len(tools)} tools. USE THEM via <tool_call>.
-
-Permissions by category: {perms_text}
-Full permission names available via permission_list tool.
-
-=== DENIED (never do these) ===
-{denial_lines}
-
-=== TOOLS ({len(tools)}) — call via <tool_call>{{"name": "...", "args": {{...}}}}</tool_call> ===
-{tool_names}
-
-{CONTROL_LOOP}\
-"""
+    # NOTE: model server fails on many newlines — keep them minimal, use " | " separators.
+    control = CONTROL_LOOP.replace("\n", " | ")
+    return (
+        f"You are Haley, ahsan's AI agent. You have {len(enabled)} permissions ON, {len(tools)} tools. "
+        f"USE THEM via <tool_call>. | Permissions by category: {perms_text} | "
+        f"DENIED (never do): {denial_str} | "
+        f"TOOLS ({len(tools)}): {tool_names} | "
+        f"{control}"
+    )
