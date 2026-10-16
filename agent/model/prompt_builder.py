@@ -95,5 +95,7 @@ def build_system_prompt() -> str:
         f"5) NEVER claim you did something without emitting the tool call first. "
         f"6) NEVER invent tool output. "
         f"You have 490 permissions ON, 333 tools. DENIED (never): {denial_str}. "
-        f"Start by using tool_discover to find the right tool."
+        f"Start by using tool_discover to find the right tool. "
+        f"EXAMPLE: if the task is to list /tmp, output exactly this one line and stop: "
+        f"<tool_call>{{\"name\": \"shell\", \"args\": {{\"command\": \"ls /tmp\"}}}}</tool_call>"
     )

@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 
 from ..model.provider import ModelProvider
 from ..model.prompt_builder import build_system_prompt
-from ..model.output_parser import parse_output
+from ..model.output_parser import parse_output, find_mentioned_tools
 from ..model.context_manager import ContextManager, ConversationHistory
 from ..tools.dispatcher import Dispatcher
 from ..tools.permission_gate import check_tool_call
@@ -105,6 +105,17 @@ class Orchestrator:
         self.context.set_section("system", self._system_prompt, priority=1)
         self.history.add("system", self._system_prompt)
 
+    def _mentioned_tools(self, text: str) -> List[str]:
+        """Known tool names mentioned in plain text (for format repair)."""
+        try:
+            names = [t.name for t in self.dispatcher.registry.list()]
+        except Exception:
+            names = []
+        try:
+            return find_mentioned_tools(text, names)
+        except Exception:
+            return []
+
     def run(self, task: str, max_tokens: int = 2048) -> AgentResult:
         """Run the full agentic loop on a task."""
         start = time.time()
@@ -150,6 +161,35 @@ class Orchestrator:
                     phases_completed=phases)
 
             parsed = parse_output(resp.text)
+
+            # FORMAT REPAIR (one retry per iteration): the model named a tool
+            # in plain text (e.g. TOOL_DISCOVER) but missed the <tool_call>
+            # format. Re-ask strictly instead of ending the loop early.
+            if not parsed.tool_calls:
+                mentioned = self._mentioned_tools(resp.text)
+                if mentioned:
+                    repair = (
+                        "FORMAT ERROR: you mentioned '" + mentioned[0] +
+                        "' but did not emit a valid <tool_call> line. "
+                        "Reply with ONLY one line in exactly this shape, "
+                        "filling in the real args you intended: "
+                        "<tool_call>{\"name\": \"" + mentioned[0] +
+                        "\", \"args\": {...}}</tool_call>"
+                    )
+                    self.history.add("user", repair)
+                    try:
+                        msgs = self.history.to_list()
+                        ctx = " | ".join(
+                            f"{m['role']}: {m['content'][:500].replace(chr(10), ' ')}"
+                            for m in msgs[-10:] if m.get('role') != 'system')
+                        resp2 = self.provider.generate(
+                            self._system_prompt, ctx, max_tokens=max_tokens)
+                        parsed2 = parse_output(resp2.text)
+                        if parsed2.tool_calls:
+                            resp = resp2
+                            parsed = parsed2
+                    except Exception:
+                        pass
 
             # No tool calls → final answer
             if not parsed.tool_calls:

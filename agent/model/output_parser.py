@@ -27,14 +27,22 @@ FINAL_RE = re.compile(
 
 
 def _try_add_tool_call(raw: str, tool_calls: list) -> None:
-    """Parse one raw JSON string into a ToolCall if valid."""
+    """Parse one raw JSON string into a ToolCall if valid.
+
+    Tolerates key variants the model may emit: name/tool/function and
+    args/arguments/parameters.
+    """
     try:
         obj = json.loads(raw.strip())
     except json.JSONDecodeError:
         return
-    name = obj.get("name")
-    args = obj.get("args", {})
-    if not name or not isinstance(args, dict):
+    if not isinstance(obj, dict):
+        return
+    name = next((obj.get(k) for k in ("name", "tool", "function")
+                 if obj.get(k)), None)
+    args = next((obj.get(k) for k in ("args", "arguments", "parameters")
+                 if isinstance(obj.get(k), dict)), {})
+    if not name:
         return
     tool_calls.append(ToolCall(name=str(name), args=args))
 
@@ -57,3 +65,23 @@ def parse_output(text: str) -> ParsedOutput:
     if not final_text and not tool_calls:
         final_text = text.strip()
     return ParsedOutput(tool_calls=tool_calls, final_text=final_text)
+
+
+def find_mentioned_tools(text: str, known_names: list[str]) -> list[str]:
+    """Return known tool names mentioned in plain text (no valid call parsed).
+
+    Used for the one-shot format repair: the model said e.g. TOOL_DISCOVER
+    instead of emitting <tool_call>. Whole-word, case-insensitive match.
+    Never raises.
+    """
+    found: list[str] = []
+    try:
+        for n in known_names or []:
+            if not n or not isinstance(n, str):
+                continue
+            if re.search(r"(?<![A-Za-z0-9_])" + re.escape(n) +
+                         r"(?![A-Za-z0-9_])", text, re.IGNORECASE):
+                found.append(n)
+    except Exception:
+        return []
+    return found
