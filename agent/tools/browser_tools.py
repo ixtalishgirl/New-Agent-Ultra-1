@@ -419,14 +419,20 @@ def main():
                     if page else {"error": "tab not found"}
             elif op == "click":
                 tid, page = resolve(ctx, args.get("tab_id"))
-                page.click(args["selector"], timeout=args.get("timeout_ms", 10000))
-                page.wait_for_timeout(500)
-                out = {"tab_id": tid, "url": page.url}
+                if not page:
+                    out = {"error": "no pages open"}
+                else:
+                    page.click(args["selector"], timeout=args.get("timeout_ms", 10000))
+                    page.wait_for_timeout(500)
+                    out = {"tab_id": tid, "url": page.url}
             elif op == "fill":
                 tid, page = resolve(ctx, args.get("tab_id"))
-                page.fill(args["selector"], args.get("value", ""),
-                          timeout=args.get("timeout_ms", 10000))
-                out = {"tab_id": tid, "filled": args["selector"]}
+                if not page:
+                    out = {"error": "no pages open"}
+                else:
+                    page.fill(args["selector"], args.get("value", ""),
+                              timeout=args.get("timeout_ms", 10000))
+                    out = {"tab_id": tid, "filled": args["selector"]}
             elif op == "select":
                 tid, page = resolve(ctx, args.get("tab_id"))
                 vals = page.select_option(args["selector"], args["value"],
@@ -859,8 +865,20 @@ def browser_fill(args: dict) -> BrowserResult:
     sel = args.get("selector")
     if not sel:
         return BrowserResult(ok=False, error="selector is required")
+    # If a url is given, open it in a new tab first so there is always
+    # a page to fill (previously failed with a confusing NoneType error
+    # when the daemon browser had no tabs open).
+    tab_id = args.get("tab_id")
+    url = args.get("url")
+    if url and not tab_id:
+        nav = _res("new_tab", {"url": url})
+        if not nav.ok:
+            return BrowserResult(
+                ok=False,
+                error=f"could not open {url}: {nav.error}")
+        tab_id = (nav.parsed or {}).get("tab_id")
     r = _res("fill", {"selector": sel, "value": str(args.get("value", "")),
-                      "tab_id": args.get("tab_id")})
+                      "tab_id": tab_id})
     if r.ok:
         r.output = f"filled '{sel}'"
     return r

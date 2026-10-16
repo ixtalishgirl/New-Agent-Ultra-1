@@ -639,6 +639,11 @@ class Dispatcher:
         if not url.startswith(("http://", "https://")):
             url = "https://" + url
         fields = args.get("fields", [])
+        # Accept both {"selector": "value"} dicts and
+        # [{"selector": ..., "value": ...}] lists.
+        if isinstance(fields, dict):
+            fields = [{"selector": k, "value": v}
+                      for k, v in fields.items()]
         submit = str(args.get("submit", ""))
         if not url or not submit:
             return DispatchResult(
