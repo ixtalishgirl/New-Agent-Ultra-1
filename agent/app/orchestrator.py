@@ -78,7 +78,7 @@ class Orchestrator:
         self,
         provider: ModelProvider,
         dispatcher: Dispatcher,
-        max_iterations: int = 10,
+        max_iterations: int = 6,
         use_planning: bool = True,
         use_memory: bool = True,
         audit_log: Optional[AuditLog] = None,
@@ -117,7 +117,7 @@ class Orchestrator:
         except Exception:
             return []
 
-    def run(self, task: str, max_tokens: int = 2048) -> AgentResult:
+    def run(self, task: str, max_tokens: int = 768) -> AgentResult:
         """Run the full agentic loop on a task."""
         start = time.time()
         phases: List[str] = []
@@ -304,7 +304,7 @@ class Orchestrator:
             phases_completed=phases)
 
     def run_with_plan(self, goal: str,
-                      max_tokens: int = 2048) -> AgentResult:
+                      max_tokens: int = 768) -> AgentResult:
         """Plan first, then execute each task through the loop."""
         plan = self.planner.plan(goal)
 

@@ -34,6 +34,7 @@ export interface ToolInfo {
 export interface ChatResult {
   success: boolean;
   reply?: string;
+  final_text?: string;
   tool_calls?: Array<Record<string, unknown>>;
   error?: string;
   [k: string]: unknown;
