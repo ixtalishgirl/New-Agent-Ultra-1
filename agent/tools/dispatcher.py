@@ -263,6 +263,11 @@ class Dispatcher:
             return self._browser("screenshot", args)
         elif name == "browser_extract":
             return self._browser("extract", args)
+        elif name == "browser_form_submit":
+            # One-shot form fill + submit (no daemon needed).
+            return self._browser_form(args)
+        elif name == "browser_click":
+            return self._browser_click(args)
         elif name == "tool_create":
             return self._tool_create(args)
         # ---- git tools ----
@@ -623,6 +628,63 @@ class Dispatcher:
                 "note": ("registered and callable immediately via "
                          "Dispatcher.dispatch; ") + bak_note,
             }, indent=1))
+
+    def _browser_form(self, args: dict) -> DispatchResult:
+        """One-shot: navigate, fill fields, click submit. No daemon needed."""
+        try:
+            from ..browser.playwright_runner import PlaywrightRunner
+        except Exception as e:
+            return DispatchResult(ok=False, output=f"Browser unavailable: {e}")
+        url = str(args.get("url", ""))
+        if not url.startswith(("http://", "https://")):
+            url = "https://" + url
+        fields = args.get("fields", [])
+        submit = str(args.get("submit", ""))
+        if not url or not submit:
+            return DispatchResult(
+                ok=False, output="browser_form_submit needs 'url' and 'submit' selector")
+        try:
+            runner = PlaywrightRunner(timeout=int(args.get("timeout", 90)))
+            res = runner.fill_form(url, fields, submit)
+            err = res.get("error", "")
+            if err:
+                return DispatchResult(ok=False, output=err[:400])
+            return DispatchResult(
+                ok=True,
+                output=json.dumps({
+                    "filled": res.get("filled", []),
+                    "title": res.get("title", ""),
+                    "url": res.get("url", url),
+                    "text": (res.get("text", "") or "")[:3000],
+                }, indent=1))
+        except Exception as e:
+            return DispatchResult(ok=False, output=f"Browser error: {e}")
+
+    def _browser_click(self, args: dict) -> DispatchResult:
+        """One-shot: navigate and click a selector. No daemon needed."""
+        try:
+            from ..browser.playwright_runner import PlaywrightRunner
+        except Exception as e:
+            return DispatchResult(ok=False, output=f"Browser unavailable: {e}")
+        url = str(args.get("url", ""))
+        if not url.startswith(("http://", "https://")):
+            url = "https://" + url
+        selector = str(args.get("selector", ""))
+        if not url or not selector:
+            return DispatchResult(
+                ok=False, output="browser_click needs 'url' and 'selector'")
+        try:
+            runner = PlaywrightRunner(timeout=int(args.get("timeout", 90)))
+            res = runner.click(url, selector)
+            err = res.get("error", "")
+            if err:
+                return DispatchResult(ok=False, output=err[:400])
+            return DispatchResult(
+                ok=True,
+                output=json.dumps({"title": res.get("title", ""),
+                                   "url": res.get("url", url)}, indent=1))
+        except Exception as e:
+            return DispatchResult(ok=False, output=f"Browser error: {e}")
 
     def _germany_fetch(self, url: str) -> DispatchResult:
         import os, urllib.request

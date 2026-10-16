@@ -44,6 +44,22 @@ def main():
                 page.click(args["selector"], timeout=10000)
                 page.wait_for_timeout(2000)
                 out = {"title": page.title(), "url": page.url}
+            elif action == "form":
+                # Fill a form and submit it in one session:
+                # {url, fields: [{selector, value}], submit: selector}
+                page.goto(url, timeout=30000)
+                filled = []
+                for f in args.get("fields", []):
+                    sel = f.get("selector")
+                    if sel:
+                        page.fill(sel, str(f.get("value", "")),
+                                  timeout=10000)
+                        filled.append(sel)
+                page.click(args["submit"], timeout=10000)
+                page.wait_for_timeout(3000)
+                out = {"title": page.title(), "url": page.url,
+                       "filled": filled,
+                       "text": page.inner_text("body")[:4000]}
             else:
                 out = {"error": f"unknown action {action}"}
         except Exception as e:
@@ -99,6 +115,16 @@ class PlaywrightRunner:
     def navigate(self, url: str) -> dict:
         """Go to URL, return title/url/text."""
         return self._run({"action": "navigate", "url": url})
+
+    def fill_form(self, url: str, fields: list, submit: str) -> dict:
+        """Fill form fields and click submit in one session."""
+        return self._run({"action": "form", "url": url,
+                          "fields": fields, "submit": submit})
+
+    def click(self, url: str, selector: str) -> dict:
+        """Go to URL and click a selector."""
+        return self._run({"action": "click", "url": url,
+                          "selector": selector})
 
     def screenshot(self, url: str, path: str = "/tmp/shot.png") -> dict:
         """Screenshot a page."""
