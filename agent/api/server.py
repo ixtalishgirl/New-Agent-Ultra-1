@@ -12,9 +12,10 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import threading
 import urllib.parse
 import urllib.request
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import sys
@@ -73,6 +74,7 @@ def _make_orchestrator():
 
 class Handler(BaseHTTPRequestHandler):
     orchestrator: Orchestrator | None = None
+    chat_lock = threading.Lock()
 
     def _json(self, code: int, obj: dict):
         body = json.dumps(obj).encode()
@@ -201,7 +203,9 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if not Handler.orchestrator:
                     Handler.orchestrator = _make_orchestrator()
-                result = Handler.orchestrator.run(prompt)
+                # Serialize chat runs: the orchestrator keeps per-run history.
+                with Handler.chat_lock:
+                    result = Handler.orchestrator.run(prompt)
                 data = result.to_dict() if hasattr(result, "to_dict") else dict(result)
                 return self._json(200, {"success": True, **data})
             except Exception as e:
@@ -242,7 +246,8 @@ class Handler(BaseHTTPRequestHandler):
 def run(port: int | None = None):
     port = port or int(os.environ.get("PORT", "8000"))
     Handler.orchestrator = None  # lazy init per request
-    server = HTTPServer(("0.0.0.0", port), Handler)
+    server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    server.daemon_threads = True
     print(f"Haley agent API on :{port}", flush=True)
     server.serve_forever()
 
