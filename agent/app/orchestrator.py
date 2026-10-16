@@ -117,7 +117,7 @@ class Orchestrator:
         except Exception:
             return []
 
-    def run(self, task: str, max_tokens: int = 768) -> AgentResult:
+    def run(self, task: str, max_tokens: int = 4096) -> AgentResult:
         """Run the full agentic loop on a task."""
         start = time.time()
         phases: List[str] = []
@@ -304,7 +304,7 @@ class Orchestrator:
             phases_completed=phases)
 
     def run_with_plan(self, goal: str,
-                      max_tokens: int = 768) -> AgentResult:
+                      max_tokens: int = 4096) -> AgentResult:
         """Plan first, then execute each task through the loop."""
         plan = self.planner.plan(goal)
 
