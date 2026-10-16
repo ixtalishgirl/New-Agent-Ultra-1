@@ -128,8 +128,8 @@ export function resolveBaseUrl(): string {
   return window.location.origin;
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const base = resolveBaseUrl();
+async function request<T>(path: string, init: RequestInit = {}, baseOverride?: string): Promise<T> {
+  const base = (baseOverride || resolveBaseUrl()).replace(/\/+$/, "");
   const password = getStoredPassword();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -179,10 +179,11 @@ export const api = {
     const data = await request<{ tools: ToolInfo[] }>("/api/tools");
     return data.tools || [];
   },
-  async executeTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+  async executeTool(name: string, args: Record<string, unknown>, baseUrl?: string): Promise<unknown> {
     const data = await request<{ success: boolean; result?: unknown; error?: string }>(
       "/api/tools/execute",
-      { method: "POST", body: JSON.stringify({ name, args }) }
+      { method: "POST", body: JSON.stringify({ name, args }) },
+      baseUrl
     );
     if (!data.success) throw new ApiError("server", 500, data.error || "Tool execution failed");
     return data.result;
@@ -210,8 +211,8 @@ export const api = {
     return typeof out === "string" ? out : JSON.stringify(out, null, 2);
   },
   /** Live browser screenshot as a data URI (PNG). Requires ?url=. */
-  async browserShot(url: string): Promise<{ data_uri: string; url: string }> {
-    const base = resolveBaseUrl();
+  async browserShot(url: string, baseUrl?: string): Promise<{ data_uri: string; url: string }> {
+    const base = (baseUrl || resolveBaseUrl()).replace(/\/+$/, "");
     const password = getStoredPassword();
     const headers: Record<string, string> = {};
     if (password) headers["x-app-password"] = password;

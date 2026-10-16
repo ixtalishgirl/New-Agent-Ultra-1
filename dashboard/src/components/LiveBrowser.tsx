@@ -9,9 +9,17 @@ import type { ConnState } from "./Connection";
  * - Live screenshots, auto-refreshing (browser_screenshot via /api/browser/shot)
  * - Extract page text (browser_extract)
  * - 24/7 Vision mode: continuous capture loop ("the agent's eyes")
+ * - Location selector: Germany (Frankfurt, DE exit IP) or USA (Virginia, US exit IP)
  */
+const LOCATIONS = [
+  { id: "auto", label: "Auto (this server)", base: "", ip: "" },
+  { id: "de", label: "🇩🇪 Germany · Frankfurt", base: "https://haley-agent-de.onrender.com", ip: "74.220.51.162" },
+  { id: "us", label: "🇺🇸 USA · Virginia", base: "https://haley-agent.onrender.com", ip: "74.220.49.7" },
+] as const;
+
 export default function LiveBrowser({ conn }: { conn: ConnState }) {
   const [url, setUrl] = useState("https://example.com");
+  const [location, setLocation] = useState<string>("auto");
   const [shot, setShot] = useState("");
   const [title, setTitle] = useState("");
   const [pageText, setPageText] = useState("");
@@ -25,6 +33,12 @@ export default function LiveBrowser({ conn }: { conn: ConnState }) {
   const timer = useRef<number | null>(null);
   const urlRef = useRef(url);
   urlRef.current = url;
+  const locRef = useRef(location);
+  locRef.current = location;
+  const locBase = (id?: string) => {
+    const l = LOCATIONS.find((x) => x.id === (id ?? locRef.current));
+    return l && l.base ? l.base : undefined;
+  };
 
   const capture = useCallback(async (target?: string) => {
     const u = (target ?? urlRef.current).trim();
@@ -32,7 +46,7 @@ export default function LiveBrowser({ conn }: { conn: ConnState }) {
     setLoading(true);
     setError("");
     try {
-      const r = await api.browserShot(u);
+      const r = await api.browserShot(u, locBase());
       setShot(r.data_uri);
       setLastShot(new Date().toLocaleTimeString());
       setShots((s) => s + 1);
@@ -51,7 +65,7 @@ export default function LiveBrowser({ conn }: { conn: ConnState }) {
     setError("");
     setPageText("");
     try {
-      const out = (await api.executeTool("browser_navigate", { url: u })) as string;
+      const out = (await api.executeTool("browser_navigate", { url: u }, locBase())) as string;
       try {
         const j = JSON.parse(out);
         setTitle(j.title || "");
@@ -73,7 +87,7 @@ export default function LiveBrowser({ conn }: { conn: ConnState }) {
     if (!u) return;
     setLoading(true);
     try {
-      const out = (await api.executeTool("browser_extract", { url: u })) as string;
+      const out = (await api.executeTool("browser_extract", { url: u }, locBase())) as string;
       setPageText(String(out));
       setShowText(true);
     } catch (e) {
@@ -107,6 +121,27 @@ export default function LiveBrowser({ conn }: { conn: ConnState }) {
           Agent Browser {vision && <span className="pill ok">● 24/7 vision on</span>}
           {loading && <span style={{ color: "var(--muted)", fontSize: 12 }}> — capturing…</span>}
         </h3>
+        <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: 12, color: "var(--muted)" }}>
+            Location
+            <select
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+              style={{ width: "auto", padding: "6px 8px" }}
+              title="Browser exit location: Germany via Frankfurt service, USA via Virginia service"
+            >
+              {LOCATIONS.map((l) => (
+                <option key={l.id} value={l.id}>{l.label}</option>
+              ))}
+            </select>
+          </label>
+          {(() => {
+            const l = LOCATIONS.find((x) => x.id === location);
+            return l && l.ip ? (
+              <span className="pill ok" style={{ fontSize: 11 }} title="Verified exit IP">exit IP {l.ip}</span>
+            ) : null;
+          })()}
+        </div>
         <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
           <input
             type="text"

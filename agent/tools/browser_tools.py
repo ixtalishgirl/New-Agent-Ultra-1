@@ -1552,6 +1552,136 @@ def cross_browser_note(args: dict) -> BrowserResult:
         parsed={"guidance": True})
 
 
+# ---------------------------------------------------------------------------
+# Mission API wrappers (developer mission Phase 3).
+# Thin adapters over the verified daemon implementation above — no new
+# browser engine, no competing framework. Names match the mission spec.
+# ---------------------------------------------------------------------------
+
+def _mission_active_tab(args: dict):
+    """Return (tab_dict, error) for the requested or active daemon tab."""
+    r = _res("tab_list", {})
+    if not r.ok:
+        return None, r.error or "browser daemon not running"
+    tabs = (r.parsed or {}).get("tabs", [])
+    if not tabs:
+        return None, "no tabs open"
+    tid = args.get("tab_id")
+    if tid:
+        for t in tabs:
+            if t.get("tab_id") == tid:
+                return t, None
+        return None, f"tab '{tid}' not found"
+    for t in tabs:
+        if t.get("active"):
+            return t, None
+    return tabs[0], None
+
+
+def browser_status(args: dict) -> BrowserResult:
+    """Mission API: is the browser daemon running?"""
+    port, err = _ensure_daemon()
+    if port is None:
+        return BrowserResult(ok=False, error=f"browser not running: {err}")
+    r = _res("tab_list", {})
+    n = len((r.parsed or {}).get("tabs", [])) if r.ok else 0
+    return BrowserResult(ok=True,
+        output=f"browser running (CDP port {port}), {n} tab(s) open",
+        parsed={"running": True, "port": port, "tabs": n})
+
+
+def browser_start(args: dict) -> BrowserResult:
+    """Mission API: start the browser (idempotent)."""
+    return browser_launch(args)
+
+
+def browser_open(args: dict) -> BrowserResult:
+    """Mission API: open a URL in the browser."""
+    url = (args.get("url") or "").strip()
+    if not url:
+        return BrowserResult(ok=False, error="url is required")
+    r = _res("new_tab", {"url": url})
+    if r.ok:
+        r.output = f"opened {r.parsed.get('tab_id')} -> {r.parsed.get('url')}"
+    return r
+
+
+def browser_get_url(args: dict) -> BrowserResult:
+    """Mission API: current URL of the active tab."""
+    t, err = _mission_active_tab(args)
+    if t is None:
+        return BrowserResult(ok=False, error=err)
+    return BrowserResult(ok=True, output=t.get("url", ""),
+                         parsed={"url": t.get("url", ""), "tab_id": t.get("tab_id")})
+
+
+def browser_get_title(args: dict) -> BrowserResult:
+    """Mission API: page title of the active tab."""
+    t, err = _mission_active_tab(args)
+    if t is None:
+        return BrowserResult(ok=False, error=err)
+    return BrowserResult(ok=True, output=t.get("title", ""),
+                         parsed={"title": t.get("title", ""), "tab_id": t.get("tab_id")})
+
+
+def browser_get_visible_text(args: dict) -> BrowserResult:
+    """Mission API: visible text of the active tab."""
+    return browser_tab_text(args)
+
+
+def browser_get_page_state(args: dict) -> BrowserResult:
+    """Mission API: URL + title + visible text of the active tab."""
+    t, err = _mission_active_tab(args)
+    if t is None:
+        return BrowserResult(ok=False, error=err)
+    txt = _res("tab_text", {"tab_id": t.get("tab_id")})
+    text = (txt.parsed.get("text", "") if txt.ok and txt.parsed else "")[:4000]
+    state = {"url": t.get("url", ""), "title": t.get("title", ""),
+             "tab_id": t.get("tab_id"), "text": text}
+    return BrowserResult(ok=True, output=json.dumps(state, indent=1)[:4500],
+                         parsed=state)
+
+
+def browser_wait_for_navigation(args: dict) -> BrowserResult:
+    """Mission API: wait for page navigation / load."""
+    return browser_wait(args)
+
+
+def browser_close_session(args: dict) -> BrowserResult:
+    """Mission API: close the browser session."""
+    return browser_close(args)
+
+
+def browser_health_check(args: dict) -> BrowserResult:
+    """Mission API: verify browser binary + daemon health."""
+    try:
+        try:
+            from agent.browser.ensure_browser import ensure_browser_installed
+        except ImportError:
+            from ..browser.ensure_browser import ensure_browser_installed  # type: ignore
+        ok, msg = ensure_browser_installed()
+    except Exception as e:
+        return BrowserResult(ok=False, error=f"install check failed: {e}")
+    if not ok:
+        return BrowserResult(ok=False, error=f"browser binary missing: {msg}")
+    st = browser_status({})
+    if not st.ok:
+        return BrowserResult(ok=False, error=f"daemon failed: {st.error}")
+    return BrowserResult(ok=True,
+        output=f"healthy: {msg}; {st.output}",
+        parsed={"healthy": True, "install": msg, "status": st.parsed})
+
+
+def browser_type(args: dict) -> BrowserResult:
+    """Mission API: type text into a field like a user typing."""
+    sel = args.get("selector")
+    if not sel:
+        return BrowserResult(ok=False, error="selector is required")
+    text = args.get("text", args.get("value", ""))
+    return browser_fill({"selector": sel, "value": str(text),
+                         "tab_id": args.get("tab_id")})
+
+
 # Module contract
 # ---------------------------------------------------------------------------
 
@@ -1678,6 +1808,32 @@ TOOL_DEFS: list[tuple] = [
       "selector": _S("string", False, "CSS selector to scroll instead of page")},
      "computer", 60),
 
+    # Mission API (developer mission Phase 3) — adapters over the daemon above.
+    ("browser_status", "Is the browser daemon running? (mission API)",
+     {}, "computer", 60),
+    ("browser_start", "Start the browser, idempotent (mission API)",
+     {}, "computer", 90),
+    ("browser_open", "Open a URL in the browser (mission API)",
+     {"url": _S("string", True, "URL to open")}, "computer", 90),
+    ("browser_get_url", "Current URL of the active tab (mission API)",
+     dict(_TAB), "computer", 60),
+    ("browser_get_title", "Page title of the active tab (mission API)",
+     dict(_TAB), "computer", 60),
+    ("browser_get_visible_text", "Visible text of the active tab (mission API)",
+     dict(_TAB), "computer", 60),
+    ("browser_get_page_state", "URL + title + visible text of the active tab (mission API)",
+     dict(_TAB), "computer", 60),
+    ("browser_wait_for_navigation", "Wait for page navigation/load (mission API)",
+     {**_TAB, "timeout_ms": _S("integer", False, "Wait timeout ms (default 10000)")},
+     "computer", 120),
+    ("browser_close_session", "Close the browser session (mission API)",
+     {}, "computer", 60),
+    ("browser_health_check", "Verify browser binary + daemon health (mission API)",
+     {}, "computer", 120),
+    ("browser_type", "Type text into a field like a user (mission API)",
+     {**_TAB, "selector": _S("string", True, "CSS selector"),
+      "text": _S("string", False, "Text to type")}, "computer", 90),
+
     ("cross_browser_note", "Honest cross-browser validation guidance",
      {}, "computer", 10),
 
@@ -1722,6 +1878,18 @@ HANDLERS: dict[str, Any] = {
     "browser_close": browser_close,
     "browser_scroll": browser_scroll,
     "cross_browser_note": cross_browser_note,
+    # Mission API (developer mission Phase 3)
+    "browser_status": browser_status,
+    "browser_start": browser_start,
+    "browser_open": browser_open,
+    "browser_get_url": browser_get_url,
+    "browser_get_title": browser_get_title,
+    "browser_get_visible_text": browser_get_visible_text,
+    "browser_get_page_state": browser_get_page_state,
+    "browser_wait_for_navigation": browser_wait_for_navigation,
+    "browser_close_session": browser_close_session,
+    "browser_health_check": browser_health_check,
+    "browser_type": browser_type,
 
 }
 
