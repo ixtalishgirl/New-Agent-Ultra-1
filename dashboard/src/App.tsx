@@ -57,6 +57,10 @@ export default function App() {
   const [connKey, setConnKey] = useState(0);
   const { state, agent, error, refresh } = useConnection(10000);
   const [pendingCount, setPendingCount] = useState(0);
+  // Sidebar starts closed on phones so the chat gets full width.
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(
+    () => typeof window === "undefined" || window.innerWidth > 800
+  );
 
   useEffect(
     () =>
@@ -79,14 +83,29 @@ export default function App() {
 
   return (
     <div className="app">
-      <aside className="sidebar">
+      <aside className={sidebarOpen ? "sidebar" : "sidebar closed"}>
         <div className="brand">
+          <button
+            className="sidebar-close"
+            onClick={() => setSidebarOpen(false)}
+            aria-label="Close sidebar"
+            title="Close sidebar"
+          >
+            ✕
+          </button>
           <h1>New-Agent-Ultra-1</h1>
           <p>Autonomous coding agent</p>
         </div>
         <nav className="nav">
           {TABS.map((t) => (
-            <button key={t.id} className={tab === t.id ? "active" : ""} onClick={() => setTab(t.id)}>
+            <button
+              key={t.id}
+              className={tab === t.id ? "active" : ""}
+              onClick={() => {
+                setTab(t.id);
+                if (window.innerWidth <= 800) setSidebarOpen(false);
+              }}
+            >
               <span className="icon">{t.icon}</span>
               <span className="lbl">{t.label}</span>
               {t.id === "approvals" && pendingCount > 0 && (
@@ -103,6 +122,14 @@ export default function App() {
 
       <div className="main">
         <div className="topbar">
+          <button
+            className="sidebar-toggle"
+            onClick={() => setSidebarOpen((o) => !o)}
+            aria-label="Toggle sidebar"
+            title="Sidebar kholo/band karo"
+          >
+            ☰
+          </button>
           <h2>{TITLES[tab]}</h2>
           <div className="spacer" />
           <ConnectionPill state={state} error={error} />

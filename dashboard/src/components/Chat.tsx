@@ -26,23 +26,41 @@ function fmtDate(t: number) {
 }
 
 // Render markdown images with data: URIs as real <img> tags so screenshots
-// sent by the agent display inline. Other text renders as-is.
+// sent by the agent display inline. File attachments render as download links.
 function renderRich(text: string, keyPrefix: string) {
-  const re = /!\[([^\]]*)\]\((data:image\/[a-zA-Z+]+;base64,[A-Za-z0-9+/=]+)\)/g;
+  // Match both ![alt](data:image/...) and [📎 name](data:...;base64,...)
+  const re = /(!?)\[([^\]]*)\]\((data:[^;]+;base64,[A-Za-z0-9+/=]+)\)/g;
   const parts: ReactNode[] = [];
   let last = 0;
   let m: RegExpExecArray | null;
   let k = 0;
   while ((m = re.exec(text)) !== null) {
     if (m.index > last) parts.push(<span key={`${keyPrefix}-t${k++}`}>{text.slice(last, m.index)}</span>);
-    parts.push(
-      <img
-        key={`${keyPrefix}-i${k++}`}
-        src={m[2]}
-        alt={m[1] || "screenshot"}
-        style={{ maxWidth: "100%", borderRadius: 8, margin: "8px 0", border: "1px solid #333" }}
-      />
-    );
+    const isImg = m[1] === "!" && m[3].startsWith("data:image/");
+    if (isImg) {
+      parts.push(
+        <img
+          key={`${keyPrefix}-i${k++}`}
+          src={m[3]}
+          alt={m[2] || "screenshot"}
+          style={{ maxWidth: "100%", borderRadius: 8, margin: "8px 0", border: "1px solid #333" }}
+        />
+      );
+    } else {
+      // File download link
+      const fname = m[2].replace(/^📎\s*/, "") || "file";
+      parts.push(
+        <a
+          key={`${keyPrefix}-f${k++}`}
+          href={m[3]}
+          download={fname}
+          className="file-chip"
+          style={{ margin: "6px 0", textDecoration: "none", color: "inherit" }}
+        >
+          📎 {fname}
+        </a>
+      );
+    }
     last = m.index + m[0].length;
   }
   if (last < text.length) parts.push(<span key={`${keyPrefix}-t${k++}`}>{text.slice(last)}</span>);
@@ -90,7 +108,7 @@ export default function Chat({ conn }: { conn: ConnState }) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [drawer, setDrawer] = useState(false);
-  const [image, setImage] = useState<string | null>(null); // attached image data URI
+  const [attach, setAttach] = useState<{name: string; mime: string; dataUri: string} | null>(null); // attached file
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -149,7 +167,7 @@ export default function Chat({ conn }: { conn: ConnState }) {
 
   const send = async () => {
     const prompt = input.trim();
-    if ((!prompt && !image) || busy) return;
+    if ((!prompt && !attach) || busy) return;
     let sid = activeId;
     if (!sid) {
       sid = createSession().id;
@@ -162,14 +180,20 @@ export default function Chat({ conn }: { conn: ConnState }) {
     }
     const sess = getSession(sid);
     const isFirst = (sess?.messages.length ?? 0) === 0;
-    // Embed the attached image as markdown so it renders inline in history
-    // and reaches the agent as part of the prompt text.
-    const fullPrompt = image
-      ? (prompt ? `${prompt}\n\n![attached image](${image})` : `![attached image](${image})`)
-      : prompt;
-    const titleSeed = prompt || "Image";
+    // Embed the attached file: images render inline, other files as download links.
+    // This reaches the agent as part of the prompt text.
+    let fullPrompt = prompt;
+    let titleSeed = prompt;
+    if (attach) {
+      const isImg = attach.mime.startsWith("image/");
+      const tag = isImg
+        ? `![${attach.name}](${attach.dataUri})`
+        : `[📎 ${attach.name}](${attach.dataUri})`;
+      fullPrompt = prompt ? `${prompt}\n\n${tag}` : tag;
+      titleSeed = prompt || attach.name;
+    }
     setInput("");
-    setImage(null);
+    setAttach(null);
     if (fileRef.current) fileRef.current.value = "";
     const withUser: ChatMsg[] = [...(sess?.messages ?? []), { role: "user", text: fullPrompt, time: Date.now() }];
     pushMsgs(sid, withUser);
@@ -209,19 +233,27 @@ export default function Chat({ conn }: { conn: ConnState }) {
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    if (!f.type.startsWith("image/")) {
-      if (fileRef.current) fileRef.current.value = "";
-      return;
-    }
     try {
-      setImage(await fileToDataUri(f));
+      let dataUri: string;
+      if (f.type.startsWith("image/")) {
+        dataUri = await fileToDataUri(f);
+      } else {
+        // Non-image: read as base64 data URI (no downscaling).
+        dataUri = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onerror = () => reject(new Error("read failed"));
+          reader.onload = () => resolve(reader.result as string);
+          reader.readAsDataURL(f);
+        });
+      }
+      setAttach({name: f.name, mime: f.type || "application/octet-stream", dataUri});
     } catch {
       if (fileRef.current) fileRef.current.value = "";
     }
   };
 
-  const clearImage = () => {
-    setImage(null);
+  const clearAttach = () => {
+    setAttach(null);
     if (fileRef.current) fileRef.current.value = "";
   };
 
@@ -305,10 +337,14 @@ export default function Chat({ conn }: { conn: ConnState }) {
         )}
         <div ref={bottomRef} />
       </div>
-      {image && (
+      {attach && (
         <div className="img-preview">
-          <img src={image} alt="attached" />
-          <button className="img-remove" onClick={clearImage} title="Remove image">
+          {attach.mime.startsWith("image/") ? (
+            <img src={attach.dataUri} alt={attach.name} />
+          ) : (
+            <span className="file-chip">📎 {attach.name}</span>
+          )}
+          <button className="img-remove" onClick={clearAttach} title="Remove file">
             ✕
           </button>
         </div>
@@ -317,7 +353,6 @@ export default function Chat({ conn }: { conn: ConnState }) {
         <input
           ref={fileRef}
           type="file"
-          accept="image/*"
           style={{ display: "none" }}
           onChange={onFile}
         />
@@ -325,7 +360,7 @@ export default function Chat({ conn }: { conn: ConnState }) {
           className="btn attach-btn"
           onClick={() => fileRef.current?.click()}
           disabled={busy}
-          title="Attach image"
+          title="Attach file"
         >
           📎
         </button>
@@ -343,7 +378,7 @@ export default function Chat({ conn }: { conn: ConnState }) {
           disabled={busy}
           rows={1}
         />
-        <button className="btn send-btn" onClick={send} disabled={busy || (!input.trim() && !image)} title="Bhejo">
+        <button className="btn send-btn" onClick={send} disabled={busy || (!input.trim() && !attach)} title="Bhejo">
           ➤
         </button>
       </div>

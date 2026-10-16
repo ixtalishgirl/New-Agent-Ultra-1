@@ -78,13 +78,24 @@ def build_system_prompt() -> str:
 
     enabled = [p for p in perms if p.get("enabled")]
 
-    # MINIMAL: model server is unstable on long prompts. Keep it tiny.
-    # The model discovers tools via the tool_discover tool.
-    # RAW per ahsan's order (2026-10-16): model exactly as downloaded.
-    # No identity, no personality, no rules, no denials — only tool-call mechanics.
-    # Strict/work-focused per his order: disciplined worker, no chit-chat.
+    # COMPACT: model server is unstable on long prompts, so the tool list is
+    # names-only grouped by family. No Haley identity/personality per
+    # ahsan's order (2026-10-16 "maat dena pechan") — only a neutral line so it
+    # stops hallucinating that it is ChatGPT/Qwen, plus the live tool list so
+    # it knows what it can actually call. The 5 denials stay enforced in code.
+    _names = sorted({t.get("name", "") for t in tools if t.get("name")})
+    _groups: dict = {}
+    for _n in _names:
+        _g = _n.split("_")[0] if "_" in _n else "misc"
+        _groups.setdefault(_g, []).append(_n)
+    _tools_line = " | ".join(
+        f"{_g.upper()}: {', '.join(_groups[_g])}" for _g in sorted(_groups)
+    )
     return (
+        f"You are an AI agent with tools. You are NOT ChatGPT, NOT Qwen, "
+        f"not a generic chatbot — never claim to be them. "
         f"Be strict and disciplined. Focus only on completing the task. No chit-chat. "
+        f"YOUR TOOLS ({len(_names)} total) — all exist, call any with <tool_call>: {_tools_line} "
         f"CRITICAL RULES: "
         f"1) You NEVER execute actions yourself. "
         f"2) To use a tool, you MUST output EXACTLY this on its own line: "
