@@ -34,12 +34,12 @@ def test_prompt_contains_all_tool_names(prompt):
 def test_prompt_lists_enabled_permissions(prompt):
     pm = build_manager(build_full_registry())
     enabled, total = pm.count_enabled()
-    assert f"all {enabled} permissions ON" in prompt
+    assert f"{enabled} permissions ON" in prompt
     assert enabled == total - 5  # only the 5 locked denials are off
 
 
 def test_prompt_contains_denials_as_denials(prompt):
-    assert "ABSOLUTE DENIALS" in prompt
+    assert "DENIED" in prompt
     for k in DENIAL_KEYS:
         assert k in prompt, f"denial {k} missing from prompt"
 
@@ -48,7 +48,6 @@ def test_prompt_keeps_control_loop(prompt):
     assert "CONTROL LOOP" in prompt
     assert "<tool_call>" in prompt
     assert "<final_answer>" in prompt
-    assert "YOU MUST USE THESE TOOLS" in prompt
 
 
 def _make_handler():

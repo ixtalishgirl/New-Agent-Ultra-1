@@ -79,35 +79,30 @@ def build_system_prompt() -> str:
     enabled = [p for p in perms if p.get("enabled")]
     locked = [p for p in perms if p.get("locked") or p.get("category") == "denial"]
 
-    tool_lines = "\n".join(
-        f"- {t['name']}: {t.get('description', '')} args=({ _compact_args(t.get('schema', {})) })"
-        for t in tools
-    ) or "- (registry unavailable — no tools loaded)"
+    # COMPACT: comma-separated tool names only (model server ~10k char limit)
+    tool_names = ", ".join(t['name'] for t in tools) or "(none)"
 
-    # Group enabled permissions by category for readability.
-    cats: dict[str, list[dict]] = {}
+    # COMPACT: permission categories with counts only (model server ~10k char limit)
+    cats: dict[str, int] = {}
     for p in enabled:
-        cats.setdefault(p.get("category", "misc"), []).append(p)
-    perm_lines = []
-    for cat in sorted(cats):
-        perm_lines.append(f"[{cat}]")
-        for p in sorted(cats[cat], key=lambda x: x.get("title", "")):
-            perm_lines.append(f"  - {p.get('title')}: {p.get('description', '')[:90]}")
-    perms_text = "\n".join(perm_lines) or "(permission manager unavailable)"
+        cats[p.get("category", "misc")] = cats.get(p.get("category", "misc"), 0) + 1
+    perms_text = ", ".join(f"{c}({n})" for c, n in sorted(cats.items()))
 
     denial_lines = "\n".join(
-        f"- {p.get('title')}: {p.get('description', '')[:120]}" for p in locked
+        f"- {p.get('title') or p.get('name') or p.get('key')}: FORBIDDEN" for p in locked
     ) or "- (none)"
 
     return f"""\
-=== YOUR POWERS — YOU MUST USE THESE TOOLS (granted by ahsan — all {len(enabled)} permissions ON) ===
-{perms_text}
+You are Haley, ahsan's AI agent. You have {len(enabled)} permissions ON, {len(tools)} tools. USE THEM via <tool_call>.
 
-=== ABSOLUTE DENIALS (never do these, no exceptions — locked, cannot be granted) ===
+Permissions by category: {perms_text}
+Full permission names available via permission_list tool.
+
+=== DENIED (never do these) ===
 {denial_lines}
 
-=== AVAILABLE TOOLS ({len(tools)}) — USE THEM, DO NOT FABRICATE OUTPUT ===
-{tool_lines}
+=== TOOLS ({len(tools)}) — call via <tool_call>{{"name": "...", "args": {{...}}}}</tool_call> ===
+{tool_names}
 
 {CONTROL_LOOP}\
 """
