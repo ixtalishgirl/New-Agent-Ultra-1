@@ -129,11 +129,11 @@ class Orchestrator:
         for i in range(1, self.max_iterations + 1):
             iter_start = time.time()
 
-            # Build context from history
+            # Build context from history (skip system — already sent separately; strip newlines for model server)
             messages = self.history.to_list()
-            context_text = "\n".join(
-                f"{m['role']}: {m['content'][:3000]}"
-                for m in messages[-10:])
+            context_text = " | ".join(
+                f"{m['role']}: {m['content'][:500].replace(chr(10), ' ')}"
+                for m in messages[-10:] if m.get('role') != 'system')
 
             # SELECT TOOL: ask model
             try:

@@ -30,7 +30,10 @@ class QwenAdapter(ModelProvider):
 
     def generate(self, system_prompt: str, user_prompt: str,
                  max_tokens: int = 2048) -> ModelResponse:
-        full_prompt = f"{system_prompt}\n\n### TASK\n{user_prompt}"
+        # NOTE: model server 500s on newlines — strip them from the combined prompt.
+        clean_system = system_prompt.replace("\n", " ")
+        clean_user = user_prompt.replace("\n", " ")
+        full_prompt = f"{clean_system} || TASK: {clean_user}"
         result = self._post("/generate", {
             "prompt": full_prompt,
             "max_tokens": max_tokens,
