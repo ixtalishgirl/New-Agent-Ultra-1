@@ -79,25 +79,17 @@ def build_system_prompt() -> str:
     enabled = [p for p in perms if p.get("enabled")]
     locked = [p for p in perms if p.get("locked") or p.get("category") == "denial"]
 
-    # COMPACT: comma-separated tool names only (model server ~10k char limit)
-    tool_names = ", ".join(t['name'] for t in tools) or "(none)"
-
-    # COMPACT: permission categories with counts only (model server ~10k char limit)
-    cats: dict[str, int] = {}
-    for p in enabled:
-        cats[p.get("category", "misc")] = cats.get(p.get("category", "misc"), 0) + 1
-    perms_text = ", ".join(f"{c}({n})" for c, n in sorted(cats.items()))
-
     denial_str = " | ".join(
         f"{p.get('title') or p.get('name') or p.get('key')}: FORBIDDEN" for p in locked
     ) or "(none)"
 
-    # NOTE: model server fails on many newlines — keep them minimal, use " | " separators.
+    # MINIMAL: model server is unstable on long prompts. Keep it tiny.
+    # The model discovers tools via the tool_discover tool.
     control = CONTROL_LOOP.replace("\n", " | ")
     return (
-        f"You are Haley, ahsan's AI agent. You have {len(enabled)} permissions ON, {len(tools)} tools. "
-        f"USE THEM via <tool_call>. | Permissions by category: {perms_text} | "
-        f"DENIED (never do): {denial_str} | "
-        f"TOOLS ({len(tools)}): {tool_names} | "
+        f"You are Haley, ahsan's AI agent with {len(enabled)} permissions ON and {len(tools)} tools. "
+        f"Call tools via <tool_call>{{\"name\": \"...\", \"args\": {{...}}}}</tool_call>. "
+        f"Use tool_discover to find tools. "
+        f"DENIED: {denial_str} | "
         f"{control}"
     )
