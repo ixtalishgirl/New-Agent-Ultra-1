@@ -223,6 +223,12 @@ def _ensure_daemon() -> tuple[Optional[int], str]:
                 return None, f"daemon failed: {err.read_text()[:400]}"
             port = _daemon_alive()
             if port:
+                # Fresh daemon start: best-effort restore of saved logins
+                # so accounts stay logged in across Render restarts.
+                try:
+                    browser_login_restore({})
+                except Exception:
+                    pass
                 return port, ""
             time.sleep(1)
         return None, "daemon did not come up within 45s (see daemon.log)"
@@ -508,6 +514,35 @@ def main():
                 elif action == "clear":
                     ctx.clear_cookies()
                     out = {"cleared": True}
+            elif op == "cookies_restore":
+                # Batch restore cookies (with domain/path) e.g. from Turso backup.
+                raw = args.get("cookies") or []
+                cleaned = []
+                for c in raw:
+                    if not isinstance(c, dict):
+                        continue
+                    name = c.get("name")
+                    value = c.get("value")
+                    if not name:
+                        continue
+                    entry = {"name": name, "value": value if value is not None else ""}
+                    # Prefer domain/path over url for cross-site restore.
+                    if c.get("domain"):
+                        entry["domain"] = c["domain"]
+                    if c.get("path"):
+                        entry["path"] = c["path"]
+                    if not entry.get("domain") and c.get("url"):
+                        entry["url"] = c["url"]
+                    if "secure" in c:
+                        entry["secure"] = bool(c["secure"])
+                    if "httpOnly" in c:
+                        entry["httpOnly"] = bool(c["httpOnly"])
+                    if "sameSite" in c and c["sameSite"] in ("Strict", "Lax", "None"):
+                        entry["sameSite"] = c["sameSite"]
+                    cleaned.append(entry)
+                if cleaned:
+                    ctx.add_cookies(cleaned)
+                out = {"restored": len(cleaned)}
             elif op == "storage":
                 tid, page = resolve(ctx, args.get("tab_id"))
                 stype = args.get("type", "local")
@@ -1133,6 +1168,94 @@ def browser_js(args: dict) -> BrowserResult:
     return r
 
 
+def _turso_exec(sql: str, params: list | None = None) -> tuple[bool, str]:
+    """Minimal Turso pipeline call (no import of turso_tools to avoid cycles)."""
+    url = os.environ.get("TURSO_URL", "").strip().rstrip("/")
+    token = os.environ.get("TURSO_TOKEN", "").strip()
+    if not url or not token:
+        return False, "TURSO_URL / TURSO_TOKEN not set"
+    def _arg(v):
+        if v is None:
+            return {"type": "null"}
+        if isinstance(v, bool):
+            return {"type": "integer", "value": str(int(v))}
+        if isinstance(v, int):
+            return {"type": "integer", "value": str(v)}
+        if isinstance(v, float):
+            return {"type": "float", "value": repr(v)}
+        return {"type": "text", "value": str(v)}
+    body = json.dumps({"requests": [
+        {"type": "execute", "stmt": {"sql": sql, "args": [_arg(p) for p in (params or [])]}},
+        {"type": "close"},
+    ]}).encode()
+    req = urllib.request.Request(url + "/v2/pipeline", data=body, method="POST",
+                                 headers={"Authorization": f"Bearer {token}",
+                                          "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return True, resp.read().decode()
+    except Exception as e:
+        return False, f"turso error: {e}"[:300]
+
+
+def browser_login_save(args: dict) -> BrowserResult:
+    """Save current browser cookies to Turso so logins survive restarts.
+    Call after logging into a site. No passwords are stored — only cookies."""
+    try:
+        r = _res("cookies", {"action": "get"})
+        if not r.ok:
+            return BrowserResult(ok=False, error="could not read cookies: " + r.error)
+        cookies = (r.parsed or {}).get("cookies") or []
+        if not cookies:
+            return BrowserResult(ok=False, error="no cookies to save (browser empty?)")
+        ok, _ = _turso_exec(
+            "CREATE TABLE IF NOT EXISTS browser_logins "
+            "(id INTEGER PRIMARY KEY CHECK (id = 1), cookies TEXT NOT NULL, updated_at TEXT NOT NULL)")
+        if not ok:
+            return BrowserResult(ok=False, error="turso unavailable")
+        import datetime
+        now = datetime.datetime.utcnow().isoformat() + "Z"
+        ok, _ = _turso_exec(
+            "INSERT INTO browser_logins (id, cookies, updated_at) VALUES (1, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET cookies=excluded.cookies, updated_at=excluded.updated_at",
+            [json.dumps(cookies), now])
+        if not ok:
+            return BrowserResult(ok=False, error="turso write failed")
+        domains = sorted({(c.get("domain") or "").lstrip(".") for c in cookies if c.get("domain")})
+        return BrowserResult(ok=True,
+                             output=f"saved {len(cookies)} cookies ({len(domains)} sites) to cloud backup",
+                             parsed={"cookies": len(cookies), "domains": domains[:20]})
+    except Exception as e:
+        return BrowserResult(ok=False, error=str(e)[:300])
+
+
+def browser_login_restore(args: dict) -> BrowserResult:
+    """Restore browser cookies from Turso cloud backup (logins survive restarts)."""
+    try:
+        ok, payload = _turso_exec("SELECT cookies FROM browser_logins WHERE id = 1")
+        if not ok:
+            return BrowserResult(ok=False, error="turso unavailable")
+        try:
+            data = json.loads(payload)
+            rows = ((data.get("results") or [{}])[0].get("response", {}).get("result", {}).get("rows") or [])
+        except Exception:
+            rows = []
+        if not rows:
+            return BrowserResult(ok=False, error="no saved login found (save one first)")
+        try:
+            cookies = json.loads(rows[0][0].get("value") if isinstance(rows[0][0], dict) else rows[0][0])
+        except Exception:
+            return BrowserResult(ok=False, error="saved login data corrupted")
+        r = _res("cookies_restore", {"cookies": cookies})
+        if not r.ok:
+            return BrowserResult(ok=False, error="restore failed: " + r.error)
+        n = (r.parsed or {}).get("restored", 0)
+        return BrowserResult(ok=True, output=f"restored {n} cookies — logins active",
+                             parsed={"restored": n})
+    except Exception as e:
+        return BrowserResult(ok=False, error=str(e)[:300])
+
+
 def browser_cookies(args: dict) -> BrowserResult:
     try:
         action = str(args.get("action", "get")).lower()
@@ -1389,6 +1512,10 @@ TOOL_DEFS: list[tuple] = [
       "name": _S("string", False, "Cookie name (set)"),
       "value": _S("string", False, "Cookie value (set)"),
       "confirm": _S("boolean", False, "Confirm clear")}, "computer", 60),
+    ("browser_login_save", "Save current logins (cookies) to cloud so they survive restarts. Call after logging in.",
+     {}, "computer", 60),
+    ("browser_login_restore", "Restore saved logins (cookies) from cloud backup.",
+     {}, "computer", 60),
     ("browser_storage", "Get/set/clear local|session storage (clear needs confirm)",
      {**_TAB, "action": _S("string", False, "get|set|clear (default get)"),
       "type": _S("string", False, "local|session (default local)"),
@@ -1443,6 +1570,8 @@ HANDLERS: dict[str, Any] = {
     "browser_upload": browser_upload,
     "browser_js": browser_js,
     "browser_cookies": browser_cookies,
+    "browser_login_save": browser_login_save,
+    "browser_login_restore": browser_login_restore,
     "browser_storage": browser_storage,
     "browser_viewport": browser_viewport,
     "browser_ua": browser_ua,

@@ -82,7 +82,9 @@ def build_system_prompt() -> str:
     # The model discovers tools via the tool_discover tool.
     # RAW per ahsan's order (2026-10-16): model exactly as downloaded.
     # No identity, no personality, no rules, no denials — only tool-call mechanics.
+    # Strict/work-focused per his order: disciplined worker, no chit-chat.
     return (
+        f"Be strict and disciplined. Focus only on completing the task. No chit-chat. "
         f"CRITICAL RULES: "
         f"1) You NEVER execute actions yourself. "
         f"2) To use a tool, you MUST output EXACTLY this on its own line: "
