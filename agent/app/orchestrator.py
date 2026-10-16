@@ -11,6 +11,7 @@ No personality. No rules. Direct execution. 5 denials enforced.
 """
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -121,6 +122,7 @@ class Orchestrator:
         start = time.time()
         phases: List[str] = []
         tool_history: List[Dict[str, Any]] = []
+        seen_calls: List[str] = []  # repetition guard keys
 
         # -- PLAN phase: decompose into a plan --------------------------------
         plan = None
@@ -204,12 +206,37 @@ class Orchestrator:
                     duration_ms=int((time.time() - start) * 1000),
                     phases_completed=phases)
 
+            # REPETITION GUARD: same exact tool call 3 times = loop.
+            # Stop and report instead of burning all iterations.
+            looped = None
+            for tc in parsed.tool_calls:
+                key = (tc.name + "::" +
+                       json.dumps(tc.args, sort_keys=True, default=str))
+                if seen_calls.count(key) >= 2:
+                    looped = tc
+                    break
+            if looped is not None:
+                last_out = (tool_history[-1]["output"][:500]
+                            if tool_history else "n/a")
+                return AgentResult(
+                    success=True,
+                    final_text=(f"Done (stopped repeat loop): "
+                                f"'{looped.name}' ran 3 times. "
+                                f"Last output: {last_out}"),
+                    iterations=i, tool_history=tool_history,
+                    plan_id=plan_id,
+                    duration_ms=int((time.time() - start) * 1000),
+                    phases_completed=phases)
+
             # CHECK PERMISSIONS + EXECUTE each tool call
             results: List[str] = []
             iter_tools: List[Dict[str, Any]] = []
             iter_results: List[Dict[str, Any]] = []
 
             for tc in parsed.tool_calls:
+                seen_calls.append(
+                    tc.name + "::" +
+                    json.dumps(tc.args, sort_keys=True, default=str))
                 # CHECK PERMISSIONS (5 denials only)
                 gate = check_tool_call(tc.name, tc.args)
                 if not gate.allowed:

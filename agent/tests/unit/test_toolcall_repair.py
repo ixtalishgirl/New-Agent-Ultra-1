@@ -151,3 +151,21 @@ def test_no_repair_when_nothing_mentioned():
     assert o.provider.n == 1
     assert result.tool_history == []
     assert result.final_text == "just a normal answer"
+
+
+def test_repetition_guard_stops_loop():
+    """Same tool call 3 times -> loop stops with a summary, not 10 iters."""
+    call = ('<tool_call>{"name": "shell", '
+            '"args": {"command": "echo hi"}}</tool_call>')
+
+    class FakeProvider:
+        def generate(self, system_prompt, user_prompt, max_tokens=2048):
+            return ModelResponse(text=call, raw={})
+
+    o = _make_orchestrator(FakeProvider())
+    o.max_iterations = 10
+    result = o.run("echo hi", max_tokens=512)
+    assert result.success is True
+    assert "repeat loop" in result.final_text
+    assert result.iterations == 3, f"expected stop at 3rd repeat, got {result.iterations}"
+    assert len(result.tool_history) == 2  # 3rd identical call never executed
