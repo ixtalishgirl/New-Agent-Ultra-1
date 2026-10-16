@@ -1364,6 +1364,55 @@ def browser_launch(args: dict) -> BrowserResult:
         return BrowserResult(ok=False, error=str(e)[:600])
 
 
+EXT_DIR = Path.home() / "browser_extensions"
+
+
+def browser_extension_install(args: dict) -> BrowserResult:
+    """Download and install a browser extension from a zip URL."""
+    url = (args.get("url") or "").strip()
+    name = (args.get("name") or "").strip() or "ext"
+    if not url:
+        return BrowserResult(ok=False, error="url is required")
+    try:
+        import zipfile
+        EXT_DIR.mkdir(parents=True, exist_ok=True)
+        safe = "".join(c for c in name if c.isalnum() or c in "-_")[:40] or "ext"
+        dest = EXT_DIR / safe
+        if dest.exists():
+            import shutil
+            shutil.rmtree(dest)
+        dest.mkdir(parents=True)
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=120) as r:
+            data = r.read()
+        tmp_zip = dest / "_dl.zip"
+        tmp_zip.write_bytes(data)
+        with zipfile.ZipFile(tmp_zip) as z:
+            z.extractall(dest)
+        tmp_zip.unlink(missing_ok=True)
+        if not (dest / "manifest.json").exists():
+            return BrowserResult(ok=False, error="no manifest.json in extension")
+        return BrowserResult(ok=True,
+            output="installed " + dest.name,
+            parsed={"name": dest.name, "path": str(dest)})
+    except Exception as e:
+        return BrowserResult(ok=False, error=str(e)[:300])
+
+
+def browser_extension_list(args: dict) -> BrowserResult:
+    """List installed browser extensions."""
+    try:
+        EXT_DIR.mkdir(parents=True, exist_ok=True)
+        exts = []
+        for d in EXT_DIR.iterdir():
+            if d.is_dir() and (d / "manifest.json").exists():
+                exts.append({"name": d.name})
+        return BrowserResult(ok=True, output=str(exts),
+                             parsed={"extensions": exts})
+    except Exception as e:
+        return BrowserResult(ok=False, error=str(e)[:300])
+
+
 def _tor_mgr():
     try:
         from agent.browser.tor_manager import ensure_tor, tor_status, tor_running
@@ -1594,6 +1643,10 @@ TOOL_DEFS: list[tuple] = [
      {}, "computer", 60),
     ("browser_login_restore", "Restore saved logins (cookies) from cloud backup.",
      {}, "computer", 60),
+    ("browser_extension_install", "Download and install a browser extension from a zip URL.",
+     {"url": _S("string", True, "Extension zip URL"), "name": _S("string", False, "Extension name")}, "computer", 120),
+    ("browser_extension_list", "List installed browser extensions.",
+     {}, "computer", 30),
     ("tor_status", "Check Tor SOCKS proxy status.",
      {}, "network", 30),
     ("tor_start", "Start Tor SOCKS proxy on 127.0.0.1:9050.",
@@ -1656,6 +1709,8 @@ HANDLERS: dict[str, Any] = {
     "browser_cookies": browser_cookies,
     "browser_login_save": browser_login_save,
     "browser_login_restore": browser_login_restore,
+    "browser_extension_install": browser_extension_install,
+    "browser_extension_list": browser_extension_list,
     "tor_status": tor_status_tool,
     "tor_start": tor_start,
     "tor_browse": tor_browse,
