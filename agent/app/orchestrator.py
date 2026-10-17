@@ -42,6 +42,7 @@ class AgentResult:
     plan_id: Optional[str] = None
     duration_ms: int = 0
     phases_completed: List[str] = field(default_factory=list)
+    browser_used: bool = False  # True if agent used any browser tool (auto-open live view)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -52,6 +53,7 @@ class AgentResult:
             "plan_id": self.plan_id,
             "duration_ms": self.duration_ms,
             "phases": self.phases_completed,
+            "browser_used": self.browser_used,
         }
 
 
@@ -226,6 +228,7 @@ class Orchestrator:
         phases: List[str] = []
         tool_history: List[Dict[str, Any]] = []
         seen_calls: List[str] = []  # repetition guard keys
+        browser_used = False  # auto-open live view if agent browses
         cid = self._norm_chat_id(chat_id)
         hist = self._chat_history(cid)
 
@@ -312,7 +315,8 @@ class Orchestrator:
                     iterations=i, tool_history=tool_history,
                     plan_id=plan_id,
                     duration_ms=int((time.time() - start) * 1000),
-                    phases_completed=phases)
+                    phases_completed=phases,
+                    browser_used=browser_used)
 
             # REPETITION GUARD: same exact tool call 3 times = loop.
             # Stop and report instead of burning all iterations.
@@ -334,7 +338,8 @@ class Orchestrator:
                     iterations=i, tool_history=tool_history,
                     plan_id=plan_id,
                     duration_ms=int((time.time() - start) * 1000),
-                    phases_completed=phases)
+                    phases_completed=phases,
+                    browser_used=browser_used)
 
             # CHECK PERMISSIONS + EXECUTE each tool call
             results: List[str] = []
@@ -370,6 +375,8 @@ class Orchestrator:
                 entry = {"tool": tc.name, "args": tc.args,
                          "ok": ok, "output": out[:2000]}
                 tool_history.append(entry)
+                if tc.name.startswith("browser"):
+                    browser_used = True
                 iter_tools.append({"name": tc.name, "args": tc.args})
                 iter_results.append({"ok": ok, "output": out[:2000]})
 
@@ -411,7 +418,8 @@ class Orchestrator:
             tool_history=tool_history,
             plan_id=plan_id,
             duration_ms=int((time.time() - start) * 1000),
-            phases_completed=phases)
+            phases_completed=phases,
+            browser_used=browser_used)
 
     def run_with_plan(self, goal: str,
                       max_tokens: int = 4096) -> AgentResult:

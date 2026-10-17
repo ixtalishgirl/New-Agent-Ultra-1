@@ -223,6 +223,11 @@ export default function Chat({ conn }: { conn: ConnState }) {
         (res as { response?: string }).response ||
         "…";
       const toolCalls = (res.tool_calls as Array<Record<string, unknown>>) || [];
+      // Agent used browser tools → auto-open the live view (user order:
+      // agent opens browser on its own, no button press needed).
+      if ((res as { browser_used?: boolean }).browser_used) {
+        setShowBrowser(true);
+      }
       const cur = getSession(sid)?.messages ?? withUser;
       pushMsgs(sid, [...cur, { role: "agent", text: String(reply), time: Date.now(), toolCalls }]);
       addEntry({
