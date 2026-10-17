@@ -465,3 +465,21 @@ button.btn {
   background: linear-gradient(90deg, #ffd1e3, var(--accent), var(--accent-2));
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
+
+/* Inline live browser panel inside the chat */
+.chat-browser-panel {
+  border-bottom: 1px solid #2a2a3a;
+  background: #0d0d14;
+  max-height: 65vh;
+  overflow: auto;
+  animation: slideDown 0.25s ease-out;
+}
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.icon-btn.active {
+  background: #2a2a4a;
+  border-color: #6a6aff;
+  box-shadow: 0 0 8px rgba(106, 106, 255, 0.4);
+}

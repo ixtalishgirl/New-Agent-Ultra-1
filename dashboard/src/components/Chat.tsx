@@ -14,6 +14,7 @@ import {
 } from "../store/chats";
 import type { ConnState } from "./Connection";
 import UploadButton from "./UploadButton";
+import LiveBrowser from "./LiveBrowser";
 
 function fmtTime(t: number) {
   return new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -134,6 +135,7 @@ export default function Chat({ conn }: { conn: ConnState }) {
   const [busy, setBusy] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [attach, setAttach] = useState<{name: string; mime: string; dataUri: string} | null>(null); // attached file
+  const [showBrowser, setShowBrowser] = useState(false); // inline live browser inside chat
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -276,10 +278,24 @@ export default function Chat({ conn }: { conn: ConnState }) {
         <div className="chat-title" title={active?.title ?? "New chat"}>
           {active?.title ?? "New chat"}
         </div>
+        <button
+          className={`icon-btn ${showBrowser ? "active" : ""}`}
+          onClick={() => setShowBrowser((s) => !s)}
+          title={showBrowser ? "Close browser" : "Open live browser"}
+        >
+          🌐
+        </button>
         <button className="icon-btn new-chat" onClick={newChat} title="New chat">
           ＋
         </button>
       </div>
+
+      {/* Inline live browser — opens inside the chat, like the assistant's */}
+      {showBrowser && (
+        <div className="chat-browser-panel">
+          <LiveBrowser conn={conn} />
+        </div>
+      )}
 
       {/* sessions drawer */}
       {drawer && (

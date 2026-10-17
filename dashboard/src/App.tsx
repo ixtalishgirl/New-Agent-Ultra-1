@@ -6,7 +6,6 @@ import Approvals from "./components/Approvals";
 import History from "./components/History";
 import Config from "./components/Config";
 import FileManager from "./components/FileManager";
-import LiveBrowser from "./components/LiveBrowser";
 import Workflows from "./components/Workflows";
 import Permissions from "./components/Permissions";
 import { ConnectionPill, useConnection, type ConnState } from "./components/Connection";
@@ -22,7 +21,6 @@ type Tab =
   | "history"
   | "config"
   | "files"
-  | "browser"
   | "automate"
   | "permissions";
 
@@ -31,7 +29,6 @@ const TABS: Array<{ id: Tab; label: string; icon: string }> = [
   { id: "tasks", label: "Tasks", icon: "📊" },
   { id: "tools", label: "Tools", icon: "🧰" },
   { id: "files", label: "Files", icon: "📁" },
-  { id: "browser", label: "Browser", icon: "🌐" },
   { id: "automate", label: "Automate", icon: "⚡" },
   { id: "permissions", label: "Permissions", icon: "🔑" },
   { id: "approvals", label: "Approvals", icon: "✅" },
@@ -44,7 +41,6 @@ const TITLES: Record<Tab, string> = {
   tasks: "Task Monitor",
   tools: "Tool Registry",
   files: "File Manager",
-  browser: "Live Browser",
   automate: "Automation",
   permissions: "Permissions",
   approvals: "Approvals",
@@ -139,7 +135,6 @@ export default function App() {
           {tab === "tasks" && <TaskMonitor conn={state as ConnState} />}
           {tab === "tools" && <ToolRegistry conn={state as ConnState} onApproval={() => setTab("approvals")} />}
           {tab === "files" && <FileManager conn={state as ConnState} />}
-          {tab === "browser" && <LiveBrowser conn={state as ConnState} />}
           {tab === "automate" && <Workflows conn={state as ConnState} />}
           {tab === "permissions" && <Permissions conn={state as ConnState} />}
           {tab === "approvals" && <Approvals />}
