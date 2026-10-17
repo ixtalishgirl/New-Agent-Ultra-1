@@ -2,12 +2,12 @@
 
 Architecture (no live-browser dependency at import time):
   * A persistent daemon (``/tmp/browser_daemon/daemon.py``) launches one
-    headless Chromium with ``launch_persistent_context`` (on-disk profile
-    under /tmp/browser_daemon/profile, so cookies/logins survive WITHIN
-    one service run; Render's disk is ephemeral so they do NOT survive
-    service restarts — cross-restart survival uses browser_login_save /
-    restore via Turso), exposes it on a CDP port, and appends
+    headless Chromium with plain ``launch()`` (reverted from
+    launch_persistent_context, which broke on Render with ETXTBSY),
+    exposes it on a CDP port, and appends
     console messages and network requests to JSONL logs.
+    Login persistence across restarts uses browser_login_save /
+    restore via Turso (Render's disk is ephemeral).
   * Each tool runs a small Playwright script in a SUBPROCESS
     (subprocess-isolated, same pattern as agent/browser/playwright_runner.py),
     connects with ``chromium.connect_over_cdp``, performs ONE operation on
@@ -104,18 +104,11 @@ def main():
         sys.exit(1)
     console_log = base / "console.jsonl"
     net_log = base / "network.jsonl"
-    # LOGIN PERSISTENCE: launch_persistent_context keeps cookies/storage in
-    # the on-disk profile (base/"profile"), so logins survive WITHIN one
-    # service run (daemon restarts reuse the same profile). It returns a
-    # BrowserContext (not a Browser) — there is exactly ONE context, so the
-    # old browser.new_context() call is dropped and the console/network
-    # listeners attach to the persistent context directly. CDP clients still
-    # get isolated per-child contexts via browser.new_context() over CDP.
-    # HONEST LIMIT: Render free-tier disk is EPHEMERAL — /tmp (including
-    # this profile) is wiped on every service restart/deploy, so logins do
-    # NOT survive service restarts from the profile alone. Cross-restart
-    # login survival is handled by browser_login_save/restore (Turso cookie
-    # backup), which _ensure_daemon() calls best-effort on fresh starts.
+    # BROWSER LAUNCH: plain p.chromium.launch() + new_context().
+    # (launch_persistent_context was tried for on-disk login persistence but
+    # broke the daemon on Render with ETXTBSY on chrome-headless-shell, so it
+    # was reverted. Login persistence across restarts is handled by
+    # browser_login_save/restore, which backs cookies up to Turso.)
     launch_kwargs = {"headless": True,
                      "args": ["--no-sandbox",
                               f"--remote-debugging-port={port}"]}
@@ -126,8 +119,8 @@ def main():
         ctx_kwargs["proxy"] = cfg["proxy"]
     try:
         with sync_playwright() as p:
-            ctx = p.chromium.launch_persistent_context(
-                str(profile), **launch_kwargs, **ctx_kwargs)
+            browser = p.chromium.launch(**launch_kwargs)
+            ctx = browser.new_context(**ctx_kwargs)
             def on_console(msg):
                 try:
                     with open(console_log, "a") as f:
