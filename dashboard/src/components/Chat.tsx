@@ -14,6 +14,7 @@ import {
 } from "../store/chats";
 import type { ConnState } from "./Connection";
 import UploadButton from "./UploadButton";
+import LiveBrowser from "./LiveBrowser";
 
 function fmtTime(t: number) {
   return new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -134,6 +135,7 @@ export default function Chat({ conn }: { conn: ConnState }) {
   const [busy, setBusy] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [attach, setAttach] = useState<{name: string; mime: string; dataUri: string} | null>(null); // attached file
+  const [showBrowser, setShowBrowser] = useState(false); // live browser auto-opens when agent browses
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -223,6 +225,8 @@ export default function Chat({ conn }: { conn: ConnState }) {
       const toolCalls = (res.tool_calls as Array<Record<string, unknown>>) || [];
       const cur = getSession(sid)?.messages ?? withUser;
       pushMsgs(sid, [...cur, { role: "agent", text: String(reply), time: Date.now(), toolCalls }]);
+      // Auto-open live browser when the agent browsed — like the assistant's browser.
+      if ((res as any).browser_used) setShowBrowser(true);
       addEntry({
         kind: "chat",
         status: res.success === false ? "error" : "ok",
@@ -342,6 +346,8 @@ export default function Chat({ conn }: { conn: ConnState }) {
           </button>
         </div>
       )}
+      {/* Live browser — auto-opens inside chat when agent browses, like the assistant's */}
+      <LiveBrowser visible={showBrowser} onClose={() => setShowBrowser(false)} />
       <div className="chat-input">
         <input
           ref={fileRef}

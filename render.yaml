@@ -3,11 +3,13 @@ services:
     name: haley-agent
     runtime: python
     plan: free
-    buildCommand: pip install -r requirements.txt && (python -m playwright install chromium || python -m playwright install --only-shell chromium || true) && npm --prefix dashboard install --no-audit --no-fund && npm --prefix dashboard run build
+    buildCommand: pip install -r requirements.txt && (PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache/ms-playwright python -m playwright install chromium || PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache/ms-playwright python -m playwright install --only-shell chromium || true) && npm --prefix dashboard install --no-audit --no-fund && npm --prefix dashboard run build
     startCommand: python3 -m agent.api.server
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: /opt/render/.cache/ms-playwright
       - key: HALEY_API_URL
         sync: false
       - key: APP_PASSWORD

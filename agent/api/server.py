@@ -266,6 +266,22 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, payload)
             except Exception as e:
                 return self._json(500, {"error": str(e)[:300]})
+        if path == "/api/browser/current":
+            # Current browser state — URL and Tor status for the live view.
+            try:
+                from agent.browser.live_session import get_session
+            except ImportError:
+                from browser.live_session import get_session  # type: ignore
+            sess = get_session()
+            try:
+                url = sess.current_url() if hasattr(sess, "current_url") else ""
+            except Exception:
+                url = ""
+            try:
+                tor = sess.tor_enabled() if hasattr(sess, "tor_enabled") else False
+            except Exception:
+                tor = False
+            return self._json(200, {"url": url, "tor": tor})
         if path == "/api/browser/live":
             # MJPEG live stream — real-time browser view like the assistant's.
             try:
