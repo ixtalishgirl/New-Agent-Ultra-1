@@ -14,7 +14,7 @@ import {
 } from "../store/chats";
 import type { ConnState } from "./Connection";
 import UploadButton from "./UploadButton";
-import AgentBrowser from "./AgentBrowser";
+import LiveView from "./LiveView";
 
 function fmtTime(t: number) {
   return new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -290,10 +290,10 @@ export default function Chat({ conn }: { conn: ConnState }) {
         </button>
       </div>
 
-      {/* Inline live browser — opens inside the chat, like the assistant's */}
+      {/* Agent ka live browser — sirf dekhne ke liye, agent khud chalata hai */}
       {showBrowser && (
         <div className="chat-browser-panel">
-          <AgentBrowser conn={conn} />
+          <LiveView conn={conn} />
         </div>
       )}
 
