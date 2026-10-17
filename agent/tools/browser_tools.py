@@ -112,9 +112,13 @@ def main():
     # browser_login_save/restore, which backs cookies up to Turso.
     launch_kwargs = {"headless": False,
                      "args": ["--no-sandbox",
+                              "--disable-setuid-sandbox",
                               "--headless=new",
                               "--disable-gpu",
                               "--disable-dev-shm-usage",
+                              "--no-zygote",
+                              "--single-process",
+                              "--disable-dbus",
                               f"--remote-debugging-port={port}"]}
     ctx_kwargs: dict = {}
     if cfg.get("user_agent"):
