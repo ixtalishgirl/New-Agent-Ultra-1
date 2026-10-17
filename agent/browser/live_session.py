@@ -60,8 +60,9 @@ class LiveSession:
             timezone_id="Europe/Berlin",
         )
         self.page = ctx.new_page()
-        self.page.goto("https://duckduckgo.com", wait_until="domcontentloaded",
-                        timeout=30000)
+        # Start blank — agent navigates when needed. (DuckDuckGo as the
+        # initial page timed out on Render's network.)
+        self.page.goto("about:blank", timeout=10000)
 
     def ensure(self):
         with _lock:
