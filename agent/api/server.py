@@ -15,6 +15,7 @@ import mimetypes
 import os
 import re
 import threading
+import time
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -265,6 +266,35 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, payload)
             except Exception as e:
                 return self._json(500, {"error": str(e)[:300]})
+        if path == "/api/browser/live":
+            # MJPEG live stream — real-time browser view like the assistant's.
+            try:
+                from agent.browser.live_session import get_session
+            except ImportError:
+                from browser.live_session import get_session  # type: ignore
+            sess = get_session()
+            sess.ensure()
+            self.send_response(200)
+            self.send_header("Content-Type",
+                             "multipart/x-mixed-replace; boundary=frame")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            try:
+                while True:
+                    frame = sess.frame_jpeg()
+                    if frame:
+                        self.wfile.write(
+                            b"--frame\r\n"
+                            b"Content-Type: image/jpeg\r\n"
+                            b"Content-Length: " + str(len(frame)).encode()
+                            + b"\r\n\r\n" + frame + b"\r\n"
+                        )
+                    else:
+                        time.sleep(0.3)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return None
         return self._json(404, {"error": "not found"})
 
     def do_POST(self):
@@ -308,6 +338,57 @@ class Handler(BaseHTTPRequestHandler):
                                    "size": len(data), "path": str(dest)})
 
         body = self._body()
+
+        if path == "/api/browser/navigate":
+            # Navigate the live browser session.
+            try:
+                from agent.browser.live_session import get_session
+            except ImportError:
+                from browser.live_session import get_session  # type: ignore
+            url = (body.get("url") or "").strip()
+            if not url:
+                return self._json(400, {"error": "url required"})
+            try:
+                final = get_session().navigate(url)
+                return self._json(200, {"ok": True, "url": final})
+            except Exception as e:
+                return self._json(502, {"error": str(e)[:300]})
+
+        if path == "/api/browser/input":
+            # Forward mouse/keyboard input to the live browser.
+            try:
+                from agent.browser.live_session import get_session
+            except ImportError:
+                from browser.live_session import get_session  # type: ignore
+            sess = get_session()
+            try:
+                kind = body.get("type")
+                if kind == "click":
+                    sess.click(float(body.get("x", 0)), float(body.get("y", 0)))
+                elif kind == "scroll":
+                    sess.scroll(float(body.get("dx", 0)), float(body.get("dy", 0)))
+                elif kind == "key":
+                    sess.key(str(body.get("key", "")))
+                elif kind == "type":
+                    sess.type_text(str(body.get("text", "")))
+                else:
+                    return self._json(400, {"error": "unknown input type"})
+                return self._json(200, {"ok": True})
+            except Exception as e:
+                return self._json(502, {"error": str(e)[:300]})
+
+        if path == "/api/browser/tor":
+            # Toggle Tor routing for the live browser session.
+            try:
+                from agent.browser.live_session import get_session
+            except ImportError:
+                from browser.live_session import get_session  # type: ignore
+            try:
+                enabled = bool(body.get("enabled"))
+                state = get_session().set_tor(enabled)
+                return self._json(200, {"ok": True, "tor": state})
+            except Exception as e:
+                return self._json(502, {"error": str(e)[:300]})
 
         if path == "/api/chat":
             prompt = body.get("prompt", body.get("message", ""))
