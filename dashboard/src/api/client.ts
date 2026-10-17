@@ -165,9 +165,22 @@ async function request<T>(path: string, init: RequestInit = {}, baseOverride?: s
   return data as T;
 }
 
+/** Live egress IP / geolocation of the backend (GET /api/ip, no auth). */
+export interface IpInfo {
+  ip?: string;
+  country?: string;
+  countryCode?: string;
+  city?: string;
+  region?: string;
+}
+
 export const api = {
   async health(): Promise<{ ok: boolean; agent?: string }> {
     return request("/api/health");
+  },
+  /** Live egress location of the backend (or a selected backend via baseUrl). */
+  async ipInfo(baseUrl?: string): Promise<IpInfo> {
+    return request<IpInfo>("/api/ip", {}, baseUrl);
   },
   async chat(prompt: string, chatId?: string): Promise<ChatResult> {
     return request<ChatResult>("/api/chat", {
@@ -238,6 +251,46 @@ export const api = {
     return data as { data_uri: string; url: string };
   },
 };
+
+export interface UploadResult {
+  ok: boolean;
+  filename: string;
+  size: number;
+  path?: string;
+}
+
+/** Upload a file via POST /api/upload (multipart/form-data, 25MB server cap). */
+export async function uploadFile(file: File, fieldName = "file"): Promise<UploadResult> {
+  const base = resolveBaseUrl().replace(/\/+$/, "");
+  const password = getStoredPassword();
+  const form = new FormData();
+  form.append(fieldName, file, file.name);
+  const headers: Record<string, string> = {};
+  if (password) headers["x-app-password"] = password;
+  let res: Response;
+  try {
+    res = await fetch(base + "/api/upload", { method: "POST", headers, body: form });
+  } catch {
+    throw new ApiError("offline", 0, "Backend unreachable — is the agent server running?");
+  }
+  let data: unknown = null;
+  try {
+    data = await res.json();
+  } catch {
+    /* non-JSON */
+  }
+  if (res.status === 401) {
+    throw new ApiError("unauthorized", 401, "Unauthorized — check the app password in Settings.");
+  }
+  if (res.status === 413) {
+    throw new ApiError("bad-request", 413, "File too large — the server caps uploads at 25MB.");
+  }
+  if (!res.ok) {
+    const msg = (data as { error?: string } | null)?.error || `Upload failed (${res.status})`;
+    throw new ApiError(res.status >= 500 ? "server" : "bad-request", res.status, msg);
+  }
+  return data as UploadResult;
+}
 
 /** Tools that change state — routed through the Approvals tab first. */
 export const DESTRUCTIVE_TOOLS = new Set([

@@ -1,214 +1,404 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError } from "../api/client";
+import type { MouseEvent as ReactMouseEvent } from "react";
+import { api, ApiError, type IpInfo } from "../api/client";
 import { addEntry } from "../store/history";
 import type { ConnState } from "./Connection";
 
 /**
- * Live Browser — watch the agent's own Chromium like ahsan watches Muse's.
- * - Navigate to any URL (browser_navigate)
- * - Live screenshots, auto-refreshing (browser_screenshot via /api/browser/shot)
- * - Extract page text (browser_extract)
- * - 24/7 Vision mode: continuous capture loop ("the agent's eyes")
- * - Location selector: Germany (Frankfurt, DE exit IP) or USA (Virginia, US exit IP)
+ * Live Browser — drive the agent's own Chromium like a remote desktop.
+ * - Click the screenshot: coordinates are scaled from the displayed size to
+ *   the real 1280x720 viewport and sent via browser_mouse_click, then the
+ *   view refreshes.
+ * - Type box sends keystrokes into the focused page element (key_type).
+ * - URL bar + Go (browser_open), back / forward / reload.
+ * - Screenshot poll loop (~2s) while the view is open + refresh after
+ *   every action.
+ * - Location shown is LIVE from GET /api/ip — never hardcoded.
  */
-const LOCATIONS = [
-  { id: "auto", label: "Auto (this server)", base: "", ip: "" },
-  { id: "de", label: "🇩🇪 Germany · Frankfurt", base: "https://haley-agent-de.onrender.com", ip: "74.220.51.162" },
-  { id: "us", label: "🇺🇸 USA · Virginia", base: "https://haley-agent.onrender.com", ip: "74.220.49.7" },
+
+const VIEW_W = 1280;
+const VIEW_H = 720;
+const POLL_MS = 2000;
+
+const BACKENDS = [
+  { id: "de", label: "Germany", base: "https://haley-agent-de.onrender.com" },
+  { id: "us", label: "USA", base: "https://haley-agent.onrender.com" },
+  { id: "local", label: "This server", base: "" },
 ] as const;
 
+function baseFor(id: string): string | undefined {
+  const b = BACKENDS.find((x) => x.id === id);
+  return b && b.base ? b.base : undefined;
+}
+
+/** browser_tab_screenshot returns "screenshot -> /tmp/...\n![screenshot](data:...)" */
+function extractShotUri(out: unknown): string {
+  const m = String(out ?? "").match(
+    /!\[screenshot\]\((data:image\/png;base64,[A-Za-z0-9+/=]+)\)/
+  );
+  return m ? m[1] : "";
+}
+
 export default function LiveBrowser({ conn }: { conn: ConnState }) {
+  const [backend, setBackend] = useState<string>("de"); // default location: Germany
+  const [ip, setIp] = useState<IpInfo | null>(null);
   const [url, setUrl] = useState("https://example.com");
-  const [location, setLocation] = useState<string>("auto");
+  const [pageUrl, setPageUrl] = useState("");
+  const [pageTitle, setPageTitle] = useState("");
   const [shot, setShot] = useState("");
-  const [title, setTitle] = useState("");
+  const [shotAt, setShotAt] = useState("");
+  const [shots, setShots] = useState(0);
+  const [stale, setStale] = useState(false);
   const [pageText, setPageText] = useState("");
   const [showText, setShowText] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [vision, setVision] = useState(false);
-  const [intervalMs, setIntervalMs] = useState(5000);
-  const [lastShot, setLastShot] = useState("");
+  const [typeText, setTypeText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [pollOn, setPollOn] = useState(true);
+  const [lastClick, setLastClick] = useState<{ x: number; y: number } | null>(null);
   const [error, setError] = useState("");
-  const [shots, setShots] = useState(0);
-  const timer = useRef<number | null>(null);
-  const urlRef = useRef(url);
-  urlRef.current = url;
-  const locRef = useRef(location);
-  locRef.current = location;
-  const locBase = (id?: string) => {
-    const l = LOCATIONS.find((x) => x.id === (id ?? locRef.current));
-    return l && l.base ? l.base : undefined;
-  };
 
-  const capture = useCallback(async (target?: string) => {
-    const u = (target ?? urlRef.current).trim();
-    if (!u) return;
-    setLoading(true);
-    setError("");
+  const backendRef = useRef(backend);
+  backendRef.current = backend;
+  const shotBusyRef = useRef(false);
+  const actBusyRef = useRef(false);
+
+  /** Grab one fresh frame from the active tab (daemon screenshot). */
+  const shotNow = useCallback(async () => {
+    if (shotBusyRef.current) return;
+    shotBusyRef.current = true;
     try {
-      const r = await api.browserShot(u, locBase());
-      setShot(r.data_uri);
-      setLastShot(new Date().toLocaleTimeString());
-      setShots((s) => s + 1);
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Screenshot failed");
-      setVision(false);
+      const out = await api.executeTool(
+        "browser_tab_screenshot",
+        {},
+        baseFor(backendRef.current)
+      );
+      const uri = extractShotUri(out);
+      if (uri) {
+        setShot(uri);
+        setShotAt(new Date().toLocaleTimeString());
+        setShots((s) => s + 1);
+        setStale(false);
+        setError("");
+      } else if (!shot) {
+        setError("Screenshot came back empty — is the browser daemon running?");
+      }
+    } catch {
+      // Poll failures shouldn't nuke a good frame; mark it stale instead.
+      setStale(true);
     } finally {
-      setLoading(false);
+      shotBusyRef.current = false;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** Read back the active tab's URL + title (cheap, no screenshot). */
+  const refreshState = useCallback(async () => {
+    try {
+      const out = await api.executeTool(
+        "browser_get_page_state",
+        {},
+        baseFor(backendRef.current)
+      );
+      const st = JSON.parse(String(out ?? "{}")) as {
+        url?: string;
+        title?: string;
+      };
+      if (st.url) {
+        setPageUrl(st.url);
+        setUrl(st.url);
+      }
+      if (st.title) setPageTitle(st.title);
+    } catch {
+      /* non-fatal — the frame still tells the story */
     }
   }, []);
 
-  const navigate = async () => {
-    const u = url.trim();
-    if (!u) return;
-    setLoading(true);
+  /** Run one browser action, then refresh the frame. */
+  const act = async (
+    name: string,
+    args: Record<string, unknown>,
+    label: string
+  ) => {
+    if (actBusyRef.current) return;
+    actBusyRef.current = true;
+    setBusy(true);
     setError("");
-    setPageText("");
     try {
-      const out = (await api.executeTool("browser_navigate", { url: u }, locBase())) as string;
-      try {
-        const j = JSON.parse(out);
-        setTitle(j.title || "");
-        setPageText(j.text || "");
-      } catch {
-        setPageText(out);
-      }
-      addEntry({ kind: "tool", status: "ok", title: "browser_navigate", detail: u });
-      await capture(u);
+      await api.executeTool(name, args, baseFor(backendRef.current));
+      addEntry({ kind: "tool", status: "ok", title: name, detail: label });
+      await refreshState();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Navigation failed");
+      setError(e instanceof ApiError ? e.message : `${name} failed`);
     } finally {
-      setLoading(false);
+      actBusyRef.current = false;
+      setBusy(false);
+      await shotNow();
     }
   };
 
-  const extract = async () => {
-    const u = url.trim();
-    if (!u) return;
-    setLoading(true);
+  const go = async () => {
+    const raw = url.trim();
+    if (!raw || actBusyRef.current) return;
+    const target = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    setUrl(target);
+    actBusyRef.current = true;
+    setBusy(true);
+    setError("");
     try {
-      const out = (await api.executeTool("browser_extract", { url: u }, locBase())) as string;
-      setPageText(String(out));
+      await api.executeTool(
+        "browser_open",
+        { url: target },
+        baseFor(backendRef.current)
+      );
+      // Pin the viewport so click coordinates map 1:1 onto 1280x720.
+      try {
+        await api.executeTool(
+          "browser_viewport",
+          { width: VIEW_W, height: VIEW_H },
+          baseFor(backendRef.current)
+        );
+      } catch {
+        /* viewport pin is best-effort */
+      }
+      addEntry({ kind: "tool", status: "ok", title: "browser_open", detail: target });
+      await refreshState();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Navigation failed");
+    } finally {
+      actBusyRef.current = false;
+      setBusy(false);
+      await shotNow();
+    }
+  };
+
+  const onShotClick = async (e: ReactMouseEvent<HTMLImageElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) return;
+    const x = Math.min(
+      VIEW_W,
+      Math.max(0, Math.round(((e.clientX - rect.left) / rect.width) * VIEW_W))
+    );
+    const y = Math.min(
+      VIEW_H,
+      Math.max(0, Math.round(((e.clientY - rect.top) / rect.height) * VIEW_H))
+    );
+    setLastClick({ x, y });
+    await act("browser_mouse_click", { x, y }, `click (${x}, ${y})`);
+  };
+
+  const typeIntoPage = async () => {
+    const t = typeText;
+    if (!t || actBusyRef.current) return;
+    // key_type types into whatever element currently has focus in the page.
+    // (browser_type needs a selector; this is the selector-free keyboard path.)
+    await act("key_type", { text: t }, `typed ${t.length} char(s)`);
+    setTypeText("");
+  };
+
+  const pressEnter = () => act("key_press", { key: "Enter" }, "pressed Enter");
+
+  const extractText = async () => {
+    if (actBusyRef.current) return;
+    actBusyRef.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      const out = await api.executeTool(
+        "browser_tab_text",
+        {},
+        baseFor(backendRef.current)
+      );
+      setPageText(String(out ?? ""));
       setShowText(true);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Extract failed");
     } finally {
-      setLoading(false);
+      actBusyRef.current = false;
+      setBusy(false);
     }
   };
 
-  // 24/7 vision loop
+  // Live egress location of the selected backend — what /api/ip really says.
   useEffect(() => {
-    if (vision) {
-      capture();
-      timer.current = window.setInterval(() => capture(), Math.max(2000, intervalMs));
-    }
+    let alive = true;
+    setIp(null);
+    api
+      .ipInfo(baseFor(backend))
+      .then((d) => {
+        if (alive) setIp(d);
+      })
+      .catch(() => {
+        if (alive) setIp(null);
+      });
     return () => {
-      if (timer.current) {
-        clearInterval(timer.current);
-        timer.current = null;
-      }
+      alive = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vision, intervalMs]);
+  }, [backend]);
 
-  if (conn !== "online") return <div className="empty">Backend offline — live browser unavailable.</div>;
+  // First frame + tab state when the view opens / backend changes.
+  useEffect(() => {
+    if (conn !== "online") return;
+    void shotNow();
+    void refreshState();
+  }, [backend, conn, shotNow, refreshState]);
+
+  // ~2s poll loop while the view is open.
+  useEffect(() => {
+    if (!pollOn || conn !== "online") return;
+    let alive = true;
+    let timer = 0;
+    const tick = async () => {
+      if (!alive) return;
+      await shotNow();
+      if (alive) timer = window.setTimeout(tick, POLL_MS);
+    };
+    void tick();
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [pollOn, conn, shotNow]);
+
+  if (conn !== "online")
+    return <div className="empty">Backend offline — live browser unavailable.</div>;
+
+  const locLabel = ip?.country
+    ? `${ip.country}${ip.city ? ` · ${ip.city}` : ""}`
+    : "locating…";
 
   return (
-    <div>
-      <div className="card">
-        <h3>
-          Agent Browser {vision && <span className="pill ok">● 24/7 vision on</span>}
-          {loading && <span style={{ color: "var(--muted)", fontSize: 12 }}> — capturing…</span>}
-        </h3>
-        <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: 12, color: "var(--muted)" }}>
-            Location
-            <select
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              style={{ width: "auto", padding: "6px 8px" }}
-              title="Browser exit location: Germany via Frankfurt service, USA via Virginia service"
-            >
-              {LOCATIONS.map((l) => (
-                <option key={l.id} value={l.id}>{l.label}</option>
-              ))}
-            </select>
+    <div className="lbrowser">
+      <div className="card lb-toolbar">
+        <div className="lb-row">
+          <span className="lb-loc" title="Live egress location — GET /api/ip on the selected backend">
+            <span className={`lb-dot ${ip ? "on" : ""}`} />
+            <strong>{locLabel}</strong>
+            {ip?.ip && <span className="mono lb-ip">{ip.ip}</span>}
+          </span>
+          <select
+            value={backend}
+            onChange={(e) => setBackend(e.target.value)}
+            className="lb-select"
+            title="Which agent backend drives the browser"
+          >
+            {BACKENDS.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.label}
+              </option>
+            ))}
+          </select>
+          <label className="lb-poll">
+            <input
+              type="checkbox"
+              checked={pollOn}
+              onChange={(e) => setPollOn(e.target.checked)}
+            />
+            live · 2s
           </label>
-          {(() => {
-            const l = LOCATIONS.find((x) => x.id === location);
-            return l && l.ip ? (
-              <span className="pill ok" style={{ fontSize: 11 }} title="Verified exit IP">exit IP {l.ip}</span>
-            ) : null;
-          })()}
+          {busy && <span className="lb-busy">working…</span>}
         </div>
-        <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+
+        <div className="lb-row">
+          <button className="icon-btn" title="Back" onClick={() => act("browser_back", {}, "back")} disabled={busy}>
+            ←
+          </button>
+          <button className="icon-btn" title="Forward" onClick={() => act("browser_forward", {}, "forward")} disabled={busy}>
+            →
+          </button>
+          <button className="icon-btn" title="Reload" onClick={() => act("browser_refresh", {}, "reload")} disabled={busy}>
+            ⟳
+          </button>
           <input
             type="text"
+            className="mono lb-urlbar"
             placeholder="https://…"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && navigate()}
-            className="mono"
-            style={{ flex: 1 }}
+            onKeyDown={(e) => e.key === "Enter" && go()}
           />
-          <button className="btn small" onClick={navigate} disabled={loading}>
+          <button className="btn small" onClick={go} disabled={busy}>
             Go
           </button>
-          <button className="btn ghost small" onClick={() => capture()} disabled={loading}>
-            📸 Shot
+        </div>
+
+        <div className="lb-row">
+          <input
+            type="text"
+            className="lb-typebox"
+            placeholder="Type into the page… (click a field in the screenshot first)"
+            value={typeText}
+            onChange={(e) => setTypeText(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && typeIntoPage()}
+          />
+          <button className="btn ghost small" onClick={typeIntoPage} disabled={busy || !typeText}>
+            Type
           </button>
-          <button className="btn ghost small" onClick={extract} disabled={loading}>
-            Extract text
+          <button className="btn ghost small" onClick={pressEnter} disabled={busy} title="Press Enter in the page">
+            ⏎
+          </button>
+          <button className="btn ghost small" onClick={extractText} disabled={busy}>
+            Text
           </button>
         </div>
-        <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", fontSize: 12, color: "var(--muted)" }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, cursor: "pointer" }}>
-            <input type="checkbox" checked={vision} onChange={(e) => setVision(e.target.checked)} style={{ width: "auto" }} />
-            24/7 Vision — continuous screenshots (the agent's eyes)
-          </label>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
-            Refresh every
-            <select value={intervalMs} onChange={(e) => setIntervalMs(Number(e.target.value))} style={{ width: "auto", padding: "6px 8px" }}>
-              <option value={3000}>3s</option>
-              <option value={5000}>5s</option>
-              <option value={10000}>10s</option>
-              <option value={30000}>30s</option>
-            </select>
-          </label>
-          {lastShot && <span>Last capture: {lastShot} · {shots} shots this session</span>}
-        </div>
-        {error && <div style={{ marginTop: 10, color: "var(--red)", fontSize: 12 }}>{error}</div>}
+
+        {error && <div className="notice err lb-err">{error}</div>}
       </div>
 
-      <div className="card">
-        <h3>
-          Live view {title && <span style={{ color: "var(--muted)", fontWeight: 400 }}>— {title}</span>}
-        </h3>
+      <div className="card lb-view">
+        <div className="lb-viewhead">
+          <span className="lb-title">{pageTitle || "Live view"}</span>
+          {pageUrl && <span className="mono lb-pageurl">{pageUrl}</span>}
+          {stale && <span className="pill warn">reconnecting…</span>}
+          {lastClick && (
+            <span className="mono lb-click" title="Last click sent to the page">
+              click ({lastClick.x}, {lastClick.y})
+            </span>
+          )}
+        </div>
         {shot ? (
           <img
             src={shot}
-            alt="Agent browser screenshot"
-            style={{ width: "100%", borderRadius: 8, border: "1px solid var(--border)", background: "#fff" }}
+            alt="Agent browser — click to click the page"
+            className="lb-shot"
+            draggable={false}
+            onDragStart={(e) => e.preventDefault()}
+            onClick={onShotClick}
+            title="Click anywhere to click the page at that point"
           />
         ) : (
           <div className="empty">
-            No screenshot yet. Enter a URL and press Go — or enable 24/7 Vision.
+            No frame yet. Enter a URL and press Go.
             <br />
-            <span style={{ fontSize: 11 }}>Requires Playwright + Chromium on the agent host.</span>
+            <span style={{ fontSize: 11 }}>
+              Requires the Playwright browser daemon on the agent host.
+            </span>
           </div>
         )}
+        <div className="lb-status">
+          {shotAt && (
+            <span>
+              frame {shotAt} · {shots} this session
+            </span>
+          )}
+          <span className="lb-hint">click the page to click · coordinate space 1280×720</span>
+        </div>
       </div>
 
-      {(showText || pageText) && (
+      {showText && (
         <div className="card">
           <h3>
-            Page content
-            <button className="btn ghost small" style={{ marginLeft: 12 }} onClick={() => setShowText(!showText)}>
-              {showText ? "Hide" : "Show"}
+            Page text
+            <button
+              className="btn ghost small"
+              style={{ marginLeft: 12 }}
+              onClick={() => setShowText(false)}
+            >
+              Hide
             </button>
           </h3>
-          {showText && <pre className="code" style={{ maxHeight: 400 }}>{pageText || "(empty)"}</pre>}
+          <pre className="code" style={{ maxHeight: 400 }}>
+            {pageText || "(empty)"}
+          </pre>
         </div>
       )}
     </div>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { api, ApiError } from "../api/client";
 import { addEntry } from "../store/history";
@@ -102,6 +102,30 @@ function fileToDataUri(file: File): Promise<string> {
   });
 }
 
+// Memoized so typing in the input (which re-renders Chat on every keystroke)
+// doesn't re-run the base64 regex + re-render every message each time.
+const MessageView = memo(function MessageView({ m, index }: { m: ChatMsg; index: number }) {
+  return (
+    <div className={`msg ${m.role}`}>
+      <div className="msg-head">
+        <span className={`avatar ${m.role}`}>
+          {m.role === "user" ? "Y" : m.role === "agent" ? "✦" : "!"}
+        </span>
+        <span className="meta">
+          {m.role === "user" ? "You" : m.role === "agent" ? "Haley" : "Error"} · {fmtTime(m.time)}
+        </span>
+      </div>
+      <div className="msg-body">{renderRich(m.text, `m${index}`)}</div>
+      {m.toolCalls && m.toolCalls.length > 0 && (
+        <details className="toolcalls">
+          <summary>{m.toolCalls.length} tool call(s)</summary>
+          <pre className="code">{JSON.stringify(m.toolCalls, null, 2)}</pre>
+        </details>
+      )}
+    </div>
+  );
+});
+
 export default function Chat({ conn }: { conn: ConnState }) {
   const [sessions, setSessions] = useState(listSessions);
   const [activeId, setActiveId] = useState<string | null>(() => listSessions()[0]?.id ?? null);
@@ -110,31 +134,15 @@ export default function Chat({ conn }: { conn: ConnState }) {
   const [drawer, setDrawer] = useState(false);
   const [attach, setAttach] = useState<{name: string; mime: string; dataUri: string} | null>(null); // attached file
   const bottomRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  // auto-grow the message box as the user types
-  useEffect(() => {
-    const el = inputRef.current;
-    if (el) {
-      el.style.height = "auto";
-      el.style.height = Math.min(el.scrollHeight, 160) + "px";
-    }
-  }, [input]);
-
-  // auto-grow the message box as the user types
-  useEffect(() => {
-    const el = inputRef.current;
-    if (el) {
-      el.style.height = "auto";
-      el.style.height = Math.min(el.scrollHeight, 160) + "px";
-    }
-  }, [input]);
 
   // keep the list fresh (cross-tab / store updates)
   useEffect(() => subscribeChats(() => setSessions(listSessions())), []);
 
-  const active = activeId ? getSession(activeId) : undefined;
+  // Read the active session from the stable `sessions` state (not a fresh
+  // localStorage parse per render) so message objects keep their identity
+  // while typing and memoized rows + the scroll effect don't refire.
+  const active = sessions.find((s) => s.id === activeId);
   const msgs: ChatMsg[] = active?.messages ?? [];
 
   useEffect(() => {
@@ -309,23 +317,7 @@ export default function Chat({ conn }: { conn: ConnState }) {
           </div>
         )}
         {msgs.map((m, i) => (
-          <div key={i} className={`msg ${m.role}`}>
-            <div className="msg-head">
-              <span className={`avatar ${m.role}`}>
-                {m.role === "user" ? "Y" : m.role === "agent" ? "✦" : "!"}
-              </span>
-              <span className="meta">
-                {m.role === "user" ? "You" : m.role === "agent" ? "Haley" : "Error"} · {fmtTime(m.time)}
-              </span>
-            </div>
-            <div className="msg-body">{renderRich(m.text, `m${i}`)}</div>
-            {m.toolCalls && m.toolCalls.length > 0 && (
-              <details className="toolcalls">
-                <summary>{m.toolCalls.length} tool call(s)</summary>
-                <pre className="code">{JSON.stringify(m.toolCalls, null, 2)}</pre>
-              </details>
-            )}
-          </div>
+          <MessageView key={i} m={m} index={i} />
         ))}
         {busy && (
           <div className="typing">
@@ -364,8 +356,8 @@ export default function Chat({ conn }: { conn: ConnState }) {
         >
           📎
         </button>
+        {/* UploadButton (sibling worker) mounts here — keep this flex slot */}
         <textarea
-          ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
