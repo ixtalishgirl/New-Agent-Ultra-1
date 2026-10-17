@@ -22,9 +22,7 @@ const POLL_MS = 2000;
 
 const BACKENDS = [
   { id: "de", label: "Germany", base: "https://haley-agent-de.onrender.com" },
-  { id: "us", label: "USA", base: "https://haley-agent.onrender.com" },
-  { id: "local", label: "This server", base: "" },
-] as const;
+] as const; // Germany ONLY (user order 2026-10-17)
 
 function baseFor(id: string): string | undefined {
   const b = BACKENDS.find((x) => x.id === id);
@@ -40,7 +38,7 @@ function extractShotUri(out: unknown): string {
 }
 
 export default function LiveBrowser({ conn }: { conn: ConnState }) {
-  const [backend, setBackend] = useState<string>("de"); // default location: Germany
+  const [backend] = useState<string>("de"); // LOCKED: Germany only (user order 2026-10-17)
   const [ip, setIp] = useState<IpInfo | null>(null);
   const [url, setUrl] = useState("https://example.com");
   const [pageUrl, setPageUrl] = useState("");
@@ -136,31 +134,64 @@ export default function LiveBrowser({ conn }: { conn: ConnState }) {
     }
   };
 
+  const [torMode, setTorMode] = useState(false); // Tor onion browsing toggle
+
   const go = async () => {
     const raw = url.trim();
     if (!raw || actBusyRef.current) return;
-    const target = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    // Smart target: .onion -> Tor; plain text -> DuckDuckGo search; else URL.
+    const isOnion = /\.onion(\/|$)/i.test(raw);
+    const looksUrl = /^[a-z0-9-]+(\.[a-z0-9-]+)+/i.test(raw.replace(/^https?:\/\//i, ""));
+    const hasSpace = /\s/.test(raw);
+    let target: string;
+    let useTor = false;
+    if (isOnion) {
+      target = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
+      useTor = true;
+    } else if (!looksUrl || hasSpace) {
+      target = `https://duckduckgo.com/?q=${encodeURIComponent(raw)}`;
+    } else {
+      target = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    }
+    if (torMode && !isOnion) useTor = false; // Tor toggle only affects .onion here
     setUrl(target);
     actBusyRef.current = true;
     setBusy(true);
     setError("");
     try {
-      await api.executeTool(
-        "browser_open",
-        { url: target },
-        baseFor(backendRef.current)
-      );
-      // Pin the viewport so click coordinates map 1:1 onto 1280x720.
-      try {
-        await api.executeTool(
-          "browser_viewport",
-          { width: VIEW_W, height: VIEW_H },
+      if (useTor || (torMode && isOnion)) {
+        const out = await api.executeTool(
+          "tor_browse",
+          { url: target },
           baseFor(backendRef.current)
         );
-      } catch {
-        /* viewport pin is best-effort */
+        const m = String(out ?? "").match(/data:image\/png;base64,[A-Za-z0-9+/=]+/);
+        if (m) {
+          setShot(`data:${m[0].split("data:")[1]}`);
+          setShotAt(new Date().toLocaleTimeString());
+          setShots((s) => s + 1);
+          setStale(false);
+          setError("");
+        }
+        addEntry({ kind: "tool", status: "ok", title: "tor_browse", detail: target });
+      } else {
+        await api.executeTool(
+          "browser_open",
+          { url: target },
+          baseFor(backendRef.current)
+        );
+        // Pin the viewport so click coordinates map 1:1 onto 1280x720.
+        try {
+          await api.executeTool(
+            "browser_viewport",
+            { width: VIEW_W, height: VIEW_H },
+            baseFor(backendRef.current)
+          );
+        } catch {
+          /* viewport pin is best-effort */
+        }
+        addEntry({ kind: "tool", status: "ok", title: "browser_open", detail: target });
       }
-      addEntry({ kind: "tool", status: "ok", title: "browser_open", detail: target });
       await refreshState();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Navigation failed");
@@ -275,18 +306,9 @@ export default function LiveBrowser({ conn }: { conn: ConnState }) {
             <strong>{locLabel}</strong>
             {ip?.ip && <span className="mono lb-ip">{ip.ip}</span>}
           </span>
-          <select
-            value={backend}
-            onChange={(e) => setBackend(e.target.value)}
-            className="lb-select"
-            title="Which agent backend drives the browser"
-          >
-            {BACKENDS.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.label}
-              </option>
-            ))}
-          </select>
+          <span className="lb-select" title="Browser location locked to Germany (user order)">
+            🇩🇪 Germany
+          </span>
           <label className="lb-poll">
             <input
               type="checkbox"
@@ -311,13 +333,22 @@ export default function LiveBrowser({ conn }: { conn: ConnState }) {
           <input
             type="text"
             className="mono lb-urlbar"
-            placeholder="https://…"
+            placeholder=https://… or search… (.onion = Tor)"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && go()}
           />
           <button className="btn small" onClick={go} disabled={busy}>
             Go
+          </button>
+          <button
+            className={`btn small ${torMode ? "tor-on" : ""}`}
+            title="Tor onion browsing — .onion sites open through Tor"
+            onClick={() => setTorMode((v) => !v)}
+            disabled={busy}
+            style={torMode ? { background: "#7c3aed", color: "#fff" } : undefined}
+          >
+            🧅 Tor {torMode ? "ON" : "OFF"}
           </button>
         </div>
 
