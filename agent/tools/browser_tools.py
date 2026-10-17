@@ -2,8 +2,11 @@
 
 Architecture (no live-browser dependency at import time):
   * A persistent daemon (``/tmp/browser_daemon/daemon.py``) launches one
-    headless Chromium with a regular ``launch`` (fresh Browser supporting
-    multiple isolated contexts), exposes it on a CDP port, and appends
+    headless Chromium with ``launch_persistent_context`` (on-disk profile
+    under /tmp/browser_daemon/profile, so cookies/logins survive WITHIN
+    one service run; Render's disk is ephemeral so they do NOT survive
+    service restarts — cross-restart survival uses browser_login_save /
+    restore via Turso), exposes it on a CDP port, and appends
     console messages and network requests to JSONL logs.
   * Each tool runs a small Playwright script in a SUBPROCESS
     (subprocess-isolated, same pattern as agent/browser/playwright_runner.py),
@@ -101,10 +104,18 @@ def main():
         sys.exit(1)
     console_log = base / "console.jsonl"
     net_log = base / "network.jsonl"
-    # NOTE: regular launch (not launch_persistent_context) — the persistent
-    # variant returns a BrowserContext, not a Browser, which broke
-    # browser.contexts / new_context (isolated contexts for replication).
-    # The profile dir is ephemeral on Render anyway.
+    # LOGIN PERSISTENCE: launch_persistent_context keeps cookies/storage in
+    # the on-disk profile (base/"profile"), so logins survive WITHIN one
+    # service run (daemon restarts reuse the same profile). It returns a
+    # BrowserContext (not a Browser) — there is exactly ONE context, so the
+    # old browser.new_context() call is dropped and the console/network
+    # listeners attach to the persistent context directly. CDP clients still
+    # get isolated per-child contexts via browser.new_context() over CDP.
+    # HONEST LIMIT: Render free-tier disk is EPHEMERAL — /tmp (including
+    # this profile) is wiped on every service restart/deploy, so logins do
+    # NOT survive service restarts from the profile alone. Cross-restart
+    # login survival is handled by browser_login_save/restore (Turso cookie
+    # backup), which _ensure_daemon() calls best-effort on fresh starts.
     launch_kwargs = {"headless": True,
                      "args": ["--no-sandbox",
                               f"--remote-debugging-port={port}"]}
@@ -115,8 +126,8 @@ def main():
         ctx_kwargs["proxy"] = cfg["proxy"]
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(**launch_kwargs)
-            ctx = browser.new_context(**ctx_kwargs)
+            ctx = p.chromium.launch_persistent_context(
+                str(profile), **launch_kwargs, **ctx_kwargs)
             def on_console(msg):
                 try:
                     with open(console_log, "a") as f:
@@ -431,6 +442,18 @@ def main():
                     page.click(args["selector"], timeout=args.get("timeout_ms", 10000))
                     page.wait_for_timeout(500)
                     out = {"tab_id": tid, "url": page.url}
+            elif op == "mouse_click":
+                # Real mouse click at absolute viewport coords (CSS pixels),
+                # no selector needed (canvas, maps, custom widgets).
+                tid, page = resolve(ctx, args.get("tab_id"))
+                if not page:
+                    out = {"error": "no pages open"}
+                else:
+                    mx, my = int(args["x"]), int(args["y"])
+                    page.mouse.click(mx, my)
+                    page.wait_for_timeout(500)
+                    out = {"tab_id": tid, "x": mx, "y": my,
+                           "url": page.url}
             elif op == "fill":
                 tid, page = resolve(ctx, args.get("tab_id"))
                 if not page:
@@ -896,6 +919,25 @@ def browser_click(args: dict) -> BrowserResult:
     return r
 
 
+def browser_mouse_click(args: dict) -> BrowserResult:
+    """Click at absolute viewport coordinates (x, y) in CSS pixels on the
+    active tab's page — a real mouse click via CDP, no selector needed
+    (canvas, maps, custom widgets). Pair with browser_inspect_element
+    (bounding box) or browser_tab_screenshot to find coordinates."""
+    try:
+        x = int(args["x"])
+        y = int(args["y"])
+    except (KeyError, TypeError, ValueError):
+        return BrowserResult(ok=False,
+                             error="x and y (integer CSS pixels) are required")
+    if x < 0 or y < 0:
+        return BrowserResult(ok=False, error="x and y must be >= 0")
+    r = _res("mouse_click", {"x": x, "y": y, "tab_id": args.get("tab_id")})
+    if r.ok:
+        r.output = f"mouse-clicked ({x}, {y}) -> {r.parsed.get('url')}"
+    return r
+
+
 def browser_fill(args: dict) -> BrowserResult:
     sel = args.get("selector")
     if not sel:
@@ -1108,16 +1150,33 @@ def browser_network(args: dict) -> BrowserResult:
         return BrowserResult(ok=False, error=str(e)[:600])
 
 
+def _safe_filename(name: str) -> str:
+    """Sanitize a URL-derived filename: strip path components, URL-decode,
+    keep only safe characters. Prevents path traversal / weird names."""
+    from urllib.parse import unquote
+    name = unquote(name or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    name = "".join(c if (c.isalnum() or c in "._-") else "_" for c in name)
+    name = name.strip("._")[:200]
+    return name or "download.bin"
+
+
 def browser_download(args: dict) -> BrowserResult:
     try:
         url = args.get("url")
         if not url:
             return BrowserResult(ok=False, error="url is required")
+        # Server-side downloads dir (env-overridable); default filenames are
+        # always sanitized so a crafted URL name can never escape the dir.
+        dl_dir = Path(os.environ.get("BROWSER_DOWNLOADS_DIR",
+                                     "/tmp/browser_downloads"))
         dest = args.get("dest")
-        if not dest:
-            name = urllib.request.urlparse(url).path.rsplit("/", 1)[-1] \
-                or "download.bin"
-            dest = str(Path("/tmp/downloads") / name)
+        if dest:
+            dest = str(Path(dest))
+            filename = Path(dest).name
+        else:
+            filename = _safe_filename(
+                urllib.request.urlparse(url).path.rsplit("/", 1)[-1])
+            dest = str(dl_dir / filename)
         if Path(dest).exists() and not args.get("confirm", False):
             return BrowserResult(ok=False, error=
                 f"{dest} exists — pass confirm=True to overwrite "
@@ -1134,9 +1193,18 @@ def browser_download(args: dict) -> BrowserResult:
                     break
                 f.write(chunk)
                 total += len(chunk)
+        # Record the download in memory (fire-and-forget: a memory failure
+        # must never break a successful download).
+        try:
+            from agent.tools.memory_tools import record_download
+            record_download(Path(dest).name, url,
+                            chat_id=args.get("chat_id"), size=total)
+        except Exception:
+            pass
         return BrowserResult(ok=True,
             output=f"downloaded {total} bytes -> {dest}",
-            parsed={"path": dest, "bytes": total, "url": url})
+            parsed={"filename": filename, "path": dest,
+                    "bytes": total, "url": url})
     except Exception as e:
         return BrowserResult(ok=False, error=str(e)[:600])
 
@@ -1719,6 +1787,10 @@ TOOL_DEFS: list[tuple] = [
      {**_TAB, "selector": _S("string", True, "CSS selector"),
       "timeout_ms": _S("integer", False, "Wait timeout ms (default 10000)")},
      "computer", 90),
+    ("browser_mouse_click", "Click at absolute viewport coordinates (x, y CSS pixels) on the active tab — real mouse click, no selector needed. Use browser_inspect_element (bounding box) or browser_tab_screenshot to find coordinates.",
+     {**_TAB, "x": _S("integer", True, "X coordinate in CSS pixels"),
+      "y": _S("integer", True, "Y coordinate in CSS pixels")},
+     "computer", 90),
     ("browser_fill", "Fill an input/textarea",
      {**_TAB, "selector": _S("string", True, "CSS selector"),
       "value": _S("string", False, "Value")}, "computer", 90),
@@ -1752,9 +1824,9 @@ TOOL_DEFS: list[tuple] = [
     ("browser_inspect_element", "Inspect a DOM element: outer HTML, attributes, computed styles, text, bounding box",
      {**_TAB, "selector": _S("string", True, "CSS selector")},
      "computer", 60),
-    ("browser_download", "Download a URL to a file (refuses overwrite without confirm)",
+    ("browser_download", "Download a URL to the server-side downloads dir (BROWSER_DOWNLOADS_DIR, default /tmp/browser_downloads) with a safe filename; refuses overwrite without confirm",
      {"url": _S("string", True, "File URL"),
-      "dest": _S("string", False, "Destination path"),
+      "dest": _S("string", False, "Destination path (overrides downloads dir)"),
       "confirm": _S("boolean", False, "Confirm overwrite")},
      "computer", 300),
     ("browser_upload", "Set files on a file input",
@@ -1851,6 +1923,7 @@ HANDLERS: dict[str, Any] = {
     "browser_tab_html": browser_tab_html,
     "browser_tab_text": browser_tab_text,
     "browser_click": browser_click,
+    "browser_mouse_click": browser_mouse_click,
     "browser_fill": browser_fill,
     "browser_select": browser_select,
     "browser_form_submit": browser_form_submit,
