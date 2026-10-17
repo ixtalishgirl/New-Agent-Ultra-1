@@ -104,23 +104,45 @@ def main():
         sys.exit(1)
     console_log = base / "console.jsonl"
     net_log = base / "network.jsonl"
-    # BROWSER LAUNCH: plain p.chromium.launch() + new_context().
-    # (launch_persistent_context was tried for on-disk login persistence but
-    # broke the daemon on Render with ETXTBSY on chrome-headless-shell, so it
-    # was reverted. Login persistence across restarts is handled by
-    # browser_login_save/restore, which backs cookies up to Turso.)
-    launch_kwargs = {"headless": True,
+    # BROWSER LAUNCH: full Chromium with --headless=new (NOT headless-shell).
+    # The headless-shell binary has gone stale/corrupt on Render's ephemeral
+    # disk (ETXTBSY spawn failures), so we bypass it entirely. Full chromium
+    # is downloaded by ensure_browser_installed() when missing.
+    # Login persistence across restarts is handled by
+    # browser_login_save/restore, which backs cookies up to Turso.
+    launch_kwargs = {"headless": False,
                      "args": ["--no-sandbox",
+                              "--headless=new",
+                              "--disable-gpu",
+                              "--disable-dev-shm-usage",
                               f"--remote-debugging-port={port}"]}
     ctx_kwargs: dict = {}
     if cfg.get("user_agent"):
         ctx_kwargs["user_agent"] = cfg["user_agent"]
     if cfg.get("proxy"):
         ctx_kwargs["proxy"] = cfg["proxy"]
+    def _try_launch(p):
+        browser = p.chromium.launch(**launch_kwargs)
+        return browser, browser.new_context(**ctx_kwargs)
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(**launch_kwargs)
-            ctx = browser.new_context(**ctx_kwargs)
+            try:
+                browser, ctx = _try_launch(p)
+            except Exception as first_err:
+                # Launch failed (e.g. corrupt/stale browser binary: ETXTBSY).
+                # Wipe and reinstall the browser once, then retry.
+                (base / "daemon.error").write_text(
+                    f"launch failed, reinstalling browser: {first_err}"[:500])
+                try:
+                    from agent.browser.ensure_browser import \
+                        ensure_browser_installed as _ebi
+                except ImportError:
+                    from ..browser.ensure_browser import \
+                        ensure_browser_installed as _ebi  # type: ignore
+                _ok, _msg = _ebi(force=True)
+                if not _ok:
+                    raise RuntimeError(f"reinstall failed: {_msg}")
+                browser, ctx = _try_launch(p)
             def on_console(msg):
                 try:
                     with open(console_log, "a") as f:
