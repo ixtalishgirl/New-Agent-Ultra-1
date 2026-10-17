@@ -13,6 +13,7 @@ import {
   type ChatMsg,
 } from "../store/chats";
 import type { ConnState } from "./Connection";
+import UploadButton from "./UploadButton";
 
 function fmtTime(t: number) {
   return new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -356,7 +357,14 @@ export default function Chat({ conn }: { conn: ConnState }) {
         >
           📎
         </button>
-        {/* UploadButton (sibling worker) mounts here — keep this flex slot */}
+        {/* UploadButton: server-side file upload (POST /api/upload) */}
+        <UploadButton
+          onUploaded={(r) =>
+            setInput((prev) =>
+              prev ? `${prev}\n[server file: ${r.filename} (${r.size} bytes)]` : `[server file: ${r.filename} (${r.size} bytes)]`
+            )
+          }
+        />
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
