@@ -126,23 +126,7 @@ def main():
         return browser, browser.new_context(**ctx_kwargs)
     try:
         with sync_playwright() as p:
-            try:
-                browser, ctx = _try_launch(p)
-            except Exception as first_err:
-                # Launch failed (e.g. corrupt/stale browser binary: ETXTBSY).
-                # Wipe and reinstall the browser once, then retry.
-                (base / "daemon.error").write_text(
-                    f"launch failed, reinstalling browser: {first_err}"[:500])
-                try:
-                    from agent.browser.ensure_browser import \
-                        ensure_browser_installed as _ebi
-                except ImportError:
-                    from ..browser.ensure_browser import \
-                        ensure_browser_installed as _ebi  # type: ignore
-                _ok, _msg = _ebi(force=True)
-                if not _ok:
-                    raise RuntimeError(f"reinstall failed: {_msg}")
-                browser, ctx = _try_launch(p)
+            browser, ctx = _try_launch(p)
             def on_console(msg):
                 try:
                     with open(console_log, "a") as f:

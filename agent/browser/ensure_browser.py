@@ -52,27 +52,14 @@ def has_browser() -> bool:
     return False
 
 
-def ensure_browser_installed(timeout: int = 420, force: bool = False) -> tuple[bool, str]:
-    """Download Chromium when missing (or when force=True).
+def ensure_browser_installed(timeout: int = 420) -> tuple[bool, str]:
+    """Download Chromium when missing.
 
-    Installs the FULL chromium build (not just headless-shell): the daemon
-    launches it with --headless=new, which is far more reliable on Render
-    than the headless-shell binary (which has gone stale/corrupt causing
-    ETXTBSY spawn failures).
-
-    Returns (ok, message). Never raises.
+    Installs the FULL chromium build first (the daemon launches it with
+    --headless=new), falling back to headless-shell. Returns (ok, message).
+    Never raises. No force-wipe: wiping a working install at runtime on a
+    small instance risks leaving no browser at all if the reinstall fails.
     """
-    if not force and has_browser():
-        return True, "browser already installed"
-    if force:
-        # Wipe potentially corrupt install so we get a clean download.
-        import shutil
-        try:
-            shutil.rmtree(browsers_path(), ignore_errors=True)
-        except Exception:
-            pass
-        # Reset the tried-guard so a fresh attempt is allowed.
-        _tried.pop(str(browsers_path()), None)
     key = str(browsers_path())
     if _tried.get(key):
         return False, "browser install already attempted in this process and failed"
