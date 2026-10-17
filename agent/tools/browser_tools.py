@@ -766,6 +766,75 @@ def main():
                 sync_session(ctx)
                 out = {"tab_id": tid, "url": page.url,
                        "logged_in": verified, "detail": detail}
+            elif op == "detect_captcha":
+                tid, page = resolve(ctx, args.get("tab_id"))
+                info = page.evaluate("""() => {
+                  const out = {type: "none", detail: ""};
+                  // reCAPTCHA v2
+                  if (document.querySelector('iframe[src*="recaptcha/api2/anchor"]') ||
+                      document.querySelector('.g-recaptcha')) {
+                    out.type = "recaptcha_v2";
+                    out.detail = "reCAPTCHA v2 checkbox found";
+                    return out;
+                  }
+                  // hCaptcha
+                  if (document.querySelector('iframe[src*="hcaptcha.com/captcha"]') ||
+                      document.querySelector('.h-captcha')) {
+                    out.type = "hcaptcha";
+                    out.detail = "hCaptcha checkbox found";
+                    return out;
+                  }
+                  // Cloudflare Turnstile
+                  if (document.querySelector('iframe[src*="challenges.cloudflare.com"]') ||
+                      document.querySelector('.cf-turnstile')) {
+                    out.type = "turnstile";
+                    out.detail = "Cloudflare Turnstile found";
+                    return out;
+                  }
+                  // PerimeterX
+                  if (document.querySelector('#px-captcha') ||
+                      document.title.includes("Press & Hold")) {
+                    out.type = "perimeterx";
+                    out.detail = "PerimeterX press-and-hold found";
+                    return out;
+                  }
+                  return out;
+                }""")
+                out = {"tab_id": tid, "type": info["type"], "detail": info["detail"]}
+            elif op == "solve_captcha":
+                tid, page = resolve(ctx, args.get("tab_id"))
+                ctype = args.get("type", "")
+                solved, detail = False, ""
+                try:
+                    if ctype == "recaptcha_v2":
+                        frame = page.frame(url=lambda u: "recaptcha/api2/anchor" in u)
+                        if frame:
+                            frame.click("#recaptcha-anchor", timeout=10000)
+                            page.wait_for_timeout(3000)
+                            solved = True
+                            detail = "clicked reCAPTCHA checkbox"
+                    elif ctype == "hcaptcha":
+                        frame = page.frame(url=lambda u: "hcaptcha.com/captcha" in u)
+                        if frame:
+                            frame.click("#checkbox", timeout=10000)
+                            page.wait_for_timeout(3000)
+                            solved = True
+                            detail = "clicked hCaptcha checkbox"
+                    elif ctype == "turnstile":
+                        frame = page.frame(url=lambda u: "challenges.cloudflare.com" in u)
+                        if frame:
+                            # Turnstile checkbox is inside shadow DOM; click center
+                            box = frame.query_selector("input")
+                            if box:
+                                box.click(timeout=10000)
+                            else:
+                                frame.click("body", timeout=10000, position={"x": 20, "y": 20})
+                            page.wait_for_timeout(3000)
+                            solved = True
+                            detail = "clicked Turnstile checkbox"
+                except Exception as e:
+                    detail = f"solve failed: {str(e)[:200]}"
+                out = {"tab_id": tid, "solved": solved, "detail": detail}
             save(tabs_file, sess)
     except Exception as e:
         out = {"error": str(e)[:800]}
@@ -1105,6 +1174,62 @@ def browser_login(args: dict) -> BrowserResult:
                          "device verification). Try success_selector or "
                          "manual approval.")
     return r
+
+
+def browser_solve_captcha(args: dict) -> BrowserResult:
+    """Detect and solve CAPTCHAs autonomously.
+
+    Detects reCAPTCHA v2, hCaptcha, Cloudflare Turnstile, and PerimeterX
+    press-and-hold challenges. For checkbox-style CAPTCHAs, clicks the
+    checkbox. For image challenges, returns the challenge details so the
+    agent can solve it visually via browser_tab_screenshot +
+    browser_mouse_click.
+
+    The agent should call this whenever a page shows a CAPTCHA or bot
+    check, and follow the returned instructions. Retries automatically.
+    """
+    # Detection via the daemon: check for known CAPTCHA selectors.
+    detect_params = {
+        "tab_id": args.get("tab_id"),
+        "op": "detect_captcha",
+    }
+    r = _res("detect_captcha", detect_params, timeout=30)
+    if not r.ok:
+        return r
+    captcha_type = r.parsed.get("type", "none")
+    detail = r.parsed.get("detail", "")
+    if captcha_type == "none":
+        return BrowserResult(ok=True, output="No CAPTCHA detected on the page.")
+    # For checkbox CAPTCHAs, attempt auto-click via daemon.
+    if captcha_type in ("recaptcha_v2", "hcaptcha", "turnstile"):
+        solve_params = {
+            "tab_id": args.get("tab_id"),
+            "type": captcha_type,
+        }
+        sr = _res("solve_captcha", solve_params, timeout=60)
+        if sr.ok and sr.parsed.get("solved"):
+            return BrowserResult(
+                ok=True,
+                output=f"CAPTCHA solved: {captcha_type}. {sr.parsed.get('detail', '')}")
+        # Fall through to manual guidance.
+        return BrowserResult(
+            ok=False,
+            error=f"Auto-solve failed for {captcha_type}.",
+            output=(f"CAPTCHA type: {captcha_type}\n{detail}\n\n"
+                    "Manual steps:\n"
+                    "1. browser_tab_screenshot to see the CAPTCHA\n"
+                    "2. browser_mouse_click the checkbox (find coords via screenshot)\n"
+                    "3. If an image challenge appears, identify the target images\n"
+                    "   from the screenshot and browser_mouse_click each one,\n"
+                    "   then click Verify."))
+    # PerimeterX press-and-hold or unknown: guide manual.
+    return BrowserResult(
+        ok=False,
+        error=f"CAPTCHA requires manual interaction: {captcha_type}",
+        output=(f"CAPTCHA type: {captcha_type}\n{detail}\n\n"
+                "1. browser_tab_screenshot to see the challenge\n"
+                "2. Follow the on-screen instructions using browser_mouse_click\n"
+                "   (for press-and-hold: click and hold via browser_mouse_click)"))
 
 
 def browser_inspect_element(args: dict) -> BrowserResult:
@@ -1844,6 +1969,8 @@ TOOL_DEFS: list[tuple] = [
       "totp_secret": _S("string", False, "Base32 TOTP secret (optional)"),
       "tab_id": _S("string", False, "Tab id (default: active tab)")},
      "computer", 180),
+    ("browser_solve_captcha", "Detect and solve CAPTCHAs autonomously (reCAPTCHA v2, hCaptcha, Cloudflare Turnstile, PerimeterX). Auto-clicks checkboxes; guides manual solving for image challenges via screenshots.",
+     {**_TAB}, "computer", 120),
     ("browser_inspect_element", "Inspect a DOM element: outer HTML, attributes, computed styles, text, bounding box",
      {**_TAB, "selector": _S("string", True, "CSS selector")},
      "computer", 60),
@@ -1954,6 +2081,7 @@ HANDLERS: dict[str, Any] = {
     "browser_console": browser_console,
     "browser_network": browser_network,
     "browser_login": browser_login,
+    "browser_solve_captcha": browser_solve_captcha,
     "browser_inspect_element": browser_inspect_element,
     "browser_download": browser_download,
     "browser_upload": browser_upload,
