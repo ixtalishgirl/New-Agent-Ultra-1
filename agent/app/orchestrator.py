@@ -96,6 +96,13 @@ class Orchestrator:
         self._system_prompt = build_system_prompt()
         self.context = ContextManager(max_tokens=8000)
         self.history = ConversationHistory(max_tokens=6000)
+        # Per-chat conversation namespaces: chat_id -> ConversationHistory.
+        # "main" reuses self.history (backward compatible); every other
+        # chat_id gets its own history, warmed from the persistent
+        # conversation store on first use so memory survives restarts.
+        self._histories: Dict[str, ConversationHistory] = {}
+        self._warmed: set = set()
+        self._conv_store_obj = None  # lazy ConversationStore
         self.planner = Planner()
         self.researcher = ResearchOrchestrator()
         self.error_analyzer = ErrorAnalyzer()
@@ -117,12 +124,110 @@ class Orchestrator:
         except Exception:
             return []
 
-    def run(self, task: str, max_tokens: int = 4096) -> AgentResult:
-        """Run the full agentic loop on a task."""
+    # -- Per-chat conversation memory -------------------------------------
+
+    @staticmethod
+    def _norm_chat_id(chat_id: Optional[str]) -> str:
+        cid = (chat_id or "").strip()
+        return cid if cid else "main"
+
+    def _conv_store(self):
+        """Lazy persistent conversation store (best effort).
+
+        DB path from HALEY_CONV_DB, else ~/.haley_conversations.db (home
+        persists across restarts; /tmp does not). Never raises — chat must
+        keep working even if persistence is unavailable.
+        """
+        if self._conv_store_obj is None:
+            try:
+                from ..memory.conversation_store import ConversationStore
+                import os
+                path = os.environ.get("HALEY_CONV_DB") or os.path.join(
+                    os.path.expanduser("~"), ".haley_conversations.db")
+                self._conv_store_obj = ConversationStore(db_path=path)
+            except Exception:
+                self._conv_store_obj = False  # remember the failure
+        return self._conv_store_obj or None
+
+    def _load_chat_turns(self, chat_id: str) -> List[Dict[str, str]]:
+        store = self._conv_store()
+        if not store:
+            return []
+        try:
+            return [{"role": t.role, "content": t.content}
+                    for t in store.get_history(chat_id, limit=40)
+                    if t.role in ("user", "assistant")]
+        except Exception:
+            return []
+
+    def _persist_turn(self, chat_id: str, role: str,
+                      content: str) -> None:
+        store = self._conv_store()
+        if not store:
+            return
+        try:
+            store.save_message(chat_id, role, content)
+        except Exception:
+            pass
+
+    def _chat_history(self, chat_id: Optional[str]) -> ConversationHistory:
+        """Return the in-memory history for a chat namespace.
+
+        Each chat_id gets its own ConversationHistory; on first use it is
+        warmed from the persistent store so the model sees that chat's
+        earlier messages even after a server restart. "main" reuses
+        self.history for backward compatibility.
+        """
+        cid = self._norm_chat_id(chat_id)
+        if cid == "main":
+            hist = self.history
+        else:
+            hist = self._histories.get(cid)
+            if hist is None:
+                hist = ConversationHistory(max_tokens=6000)
+                hist.add("system", self._system_prompt)
+                self._histories[cid] = hist
+        if cid not in self._warmed:
+            self._warmed.add(cid)
+            for m in self._load_chat_turns(cid):
+                hist.add(m["role"], m["content"])
+        return hist
+
+    def get_chat_history(self, chat_id: str = "main") -> List[Dict[str, str]]:
+        """Read a chat's in-memory history (warms it first)."""
+        return self._chat_history(chat_id).to_list()
+
+    def reset_chat(self, chat_id: str = "main") -> None:
+        """Start a fresh conversation for one chat (keep system prompt),
+        clearing both in-memory and persisted turns for that namespace."""
+        cid = self._norm_chat_id(chat_id)
+        hist = self._histories.pop(cid, None) if cid != "main" else self.history
+        sys_msg = hist.messages[0] if hist.messages else None
+        hist.clear(keep_system=False)
+        if sys_msg:
+            hist.messages.append(sys_msg)
+        self._warmed.discard(cid)
+        try:
+            store = self._conv_store()
+            if store:
+                store.delete_chat(cid)
+        except Exception:
+            pass
+
+    def run(self, task: str, max_tokens: int = 4096,
+            chat_id: str = "main") -> AgentResult:
+        """Run the full agentic loop on a task.
+
+        chat_id namespaces the conversation: each chat (dashboard
+        side-chat id, or "main") gets its own history and its own
+        persisted memory, so chats never see each other's context.
+        """
         start = time.time()
         phases: List[str] = []
         tool_history: List[Dict[str, Any]] = []
         seen_calls: List[str] = []  # repetition guard keys
+        cid = self._norm_chat_id(chat_id)
+        hist = self._chat_history(cid)
 
         # -- PLAN phase: decompose into a plan --------------------------------
         plan = None
@@ -136,14 +241,15 @@ class Orchestrator:
                 pass
 
         # -- Main ReAct loop ---------------------------------------------------
-        self.history.add("user", task)
+        hist.add("user", task)
+        self._persist_turn(cid, "user", task)
         iterations: List[IterationRecord] = []
 
         for i in range(1, self.max_iterations + 1):
             iter_start = time.time()
 
             # Build context from history (skip system — already sent separately; strip newlines for model server)
-            messages = self.history.to_list()
+            messages = hist.to_list()
             context_text = " | ".join(
                 f"{m['role']}: {m['content'][:500].replace(chr(10), ' ')}"
                 for m in messages[-10:] if m.get('role') != 'system')
@@ -154,6 +260,7 @@ class Orchestrator:
                     self._system_prompt, context_text,
                     max_tokens=max_tokens)
             except Exception as e:
+                self._persist_turn(cid, "assistant", f"Model error: {e}")
                 return AgentResult(
                     success=False,
                     final_text=f"Model error: {e}",
@@ -178,9 +285,9 @@ class Orchestrator:
                         "<tool_call>{\"name\": \"" + mentioned[0] +
                         "\", \"args\": {...}}</tool_call>"
                     )
-                    self.history.add("user", repair)
+                    hist.add("user", repair)
                     try:
-                        msgs = self.history.to_list()
+                        msgs = hist.to_list()
                         ctx = " | ".join(
                             f"{m['role']}: {m['content'][:500].replace(chr(10), ' ')}"
                             for m in msgs[-10:] if m.get('role') != 'system')
@@ -195,7 +302,8 @@ class Orchestrator:
 
             # No tool calls → final answer
             if not parsed.tool_calls:
-                self.history.add("assistant", resp.text)
+                hist.add("assistant", resp.text)
+                self._persist_turn(cid, "assistant", resp.text)
                 phases.append("final_answer")
                 self._save_memory(task, parsed.final_text, True)
                 return AgentResult(
@@ -282,8 +390,8 @@ class Orchestrator:
             feedback = (f"Tool results:\n" + "\n".join(results) +
                         "\n\nContinue. Emit more <tool_call> blocks or "
                         "<final_answer>.")
-            self.history.add("assistant", resp.text)
-            self.history.add("user", feedback)
+            hist.add("assistant", resp.text)
+            hist.add("user", feedback)
 
             iterations.append(IterationRecord(
                 n=i, model_output=resp.text[:2000],
@@ -294,6 +402,8 @@ class Orchestrator:
 
         # Max iterations reached
         self._save_memory(task, "Max iterations reached", False)
+        self._persist_turn(cid, "assistant",
+                           "Max iterations reached without final answer.")
         return AgentResult(
             success=False,
             final_text="Max iterations reached without final answer.",
@@ -356,7 +466,4 @@ class Orchestrator:
 
     def reset(self) -> None:
         """Start a fresh conversation (keep system prompt)."""
-        sys_msg = self.history.messages[0] if self.history.messages else None
-        self.history.clear(keep_system=False)
-        if sys_msg:
-            self.history.messages.append(sys_msg)
+        self.reset_chat("main")

@@ -214,15 +214,23 @@ class Handler(BaseHTTPRequestHandler):
             prompt = body.get("prompt", body.get("message", ""))
             if not prompt:
                 return self._json(400, {"error": "prompt required"})
-            audit.record("chat", details={"prompt_len": len(prompt)})
+            # Per-chat memory namespace: dashboard sends its side-chat id
+            # as chat_id; anything missing/blank falls back to "main"
+            # (which also owns all pre-namespacing history).
+            chat_id = body.get("chat_id") or body.get("session_id") or "main"
+            chat_id = re.sub(r"[^A-Za-z0-9._-]", "",
+                             str(chat_id)).strip()[:64] or "main"
+            audit.record("chat", details={"prompt_len": len(prompt),
+                                          "chat_id": chat_id})
             try:
                 if not Handler.orchestrator:
                     Handler.orchestrator = _make_orchestrator()
-                # Serialize chat runs: the orchestrator keeps per-run history.
+                # Serialize chat runs: the orchestrator keeps per-chat history.
                 with Handler.chat_lock:
-                    result = Handler.orchestrator.run(prompt)
+                    result = Handler.orchestrator.run(prompt, chat_id=chat_id)
                 data = result.to_dict() if hasattr(result, "to_dict") else dict(result)
-                return self._json(200, {"success": True, **data})
+                return self._json(200, {"success": True,
+                                        "chat_id": chat_id, **data})
             except Exception as e:
                 return self._json(500, {"success": False, "error": str(e)[:500]})
 

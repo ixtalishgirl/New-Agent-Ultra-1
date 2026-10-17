@@ -169,10 +169,12 @@ export const api = {
   async health(): Promise<{ ok: boolean; agent?: string }> {
     return request("/api/health");
   },
-  async chat(prompt: string): Promise<ChatResult> {
+  async chat(prompt: string, chatId?: string): Promise<ChatResult> {
     return request<ChatResult>("/api/chat", {
       method: "POST",
-      body: JSON.stringify({ prompt }),
+      // chatId namespaces server-side memory: each dashboard side-chat
+      // gets its own conversation history ("main" when omitted).
+      body: JSON.stringify(chatId ? { prompt, chat_id: chatId } : { prompt }),
     });
   },
   async listTools(): Promise<ToolInfo[]> {

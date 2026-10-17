@@ -203,7 +203,7 @@ export default function Chat({ conn }: { conn: ConnState }) {
     }
     setBusy(true);
     try {
-      const res = await api.chat(fullPrompt);
+      const res = await api.chat(fullPrompt, sid);
       // The backend returns {success, final_text, iterations, ...} —
       // show ONLY her words, never the raw technical wrapper.
       const reply =
