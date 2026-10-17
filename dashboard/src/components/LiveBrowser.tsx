@@ -333,7 +333,7 @@ export default function LiveBrowser({ conn }: { conn: ConnState }) {
           <input
             type="text"
             className="mono lb-urlbar"
-            placeholder=https://… or search… (.onion = Tor)"
+            placeholder="https://… or search… (.onion = Tor)"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && go()}
