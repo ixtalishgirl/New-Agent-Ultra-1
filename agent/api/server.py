@@ -68,6 +68,7 @@ def _make_orchestrator():
     )
     provider = QwenAdapter(base_url=base_url)
     workspace = os.environ.get("AGENT_WORKSPACE", str(Path.home() / "workspace"))
+    os.makedirs(workspace, exist_ok=True)
     dispatcher = _make_dispatcher(workspace)
     return Orchestrator(provider, dispatcher)
 
