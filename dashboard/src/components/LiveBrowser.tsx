@@ -24,7 +24,8 @@ export default function LiveBrowser({ visible, onClose }: LiveBrowserProps) {
   useEffect(() => {
     if (!visible) return;
     setStreamKey((k) => k + 1); // force stream refresh
-    api.get("/api/browser/current")
+    fetch("/api/browser/current")
+      .then((r) => r.json())
       .then((d: any) => {
         if (d.url) {
           setUrl(d.url);
@@ -43,7 +44,7 @@ export default function LiveBrowser({ visible, onClose }: LiveBrowserProps) {
     setLoading(true);
     try {
       const full = u.startsWith("http") ? u : "https://" + u;
-      await api.post("/api/browser/navigate", { url: full });
+      await api.executeTool("browser_navigate", { url: full });
       setUrl(full);
       setInputUrl(full);
       setStreamKey((k) => k + 1);
@@ -56,8 +57,8 @@ export default function LiveBrowser({ visible, onClose }: LiveBrowserProps) {
 
   const toggleTor = async () => {
     try {
-      const d: any = await api.post("/api/browser/tor", { enabled: !torOn });
-      setTorOn(!!d.tor);
+      const d: any = await api.executeTool("browser_tor", { enabled: !torOn });
+      setTorOn(!!(d && (d as any).tor));
       setStreamKey((k) => k + 1);
     } catch (e) {
       console.error("tor toggle failed", e);
