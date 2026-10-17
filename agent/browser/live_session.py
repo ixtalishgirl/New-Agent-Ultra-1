@@ -40,6 +40,7 @@ class LiveSession:
             proxy = {"server": "socks5://127.0.0.1:9050"}
         self.browser = self.playwright.chromium.launch(
             headless=True,
+            channel="chromium-headless-shell",  # lightweight: ~100MB vs ~300MB full Chromium
             proxy=proxy,
             args=[
                 "--no-sandbox",
@@ -47,6 +48,11 @@ class LiveSession:
                 "--disable-gpu",
                 "--single-process",
                 "--no-zygote",
+                "--disable-extensions",
+                "--disable-background-networking",
+                "--disable-background-timer-throttling",
+                "--disable-renderer-backgrounding",
+                "--memory-pressure-off",
             ],
         )
         ctx = self.browser.new_context(

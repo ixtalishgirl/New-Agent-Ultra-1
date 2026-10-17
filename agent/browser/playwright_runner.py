@@ -20,7 +20,12 @@ def main():
     url = args.get("url", "")
     out = {}
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
+        browser = p.chromium.launch(
+            headless=True,
+            channel="chromium-headless-shell",
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
+                  "--single-process", "--no-zygote", "--disable-extensions"],
+        )
         ctx = browser.new_context(
             user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
         )
