@@ -6,12 +6,14 @@ Endpoints:
   GET  /api/tools      — list tools (auth)
   POST /api/tools/execute — run tool (auth)
   GET  /api/tunnel/status — tunnel health (auth)
+  POST /api/upload       — multipart file upload (auth, 25MB cap)
 Auth: x-app-password header or ?password= query.
 """
 from __future__ import annotations
 import json
 import mimetypes
 import os
+import re
 import threading
 import urllib.parse
 import urllib.request
@@ -30,6 +32,46 @@ from agent.security.audit_log import AuditLog
 
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 audit = AuditLog()
+
+# ---------------------------------------------------------------------------
+# File upload (stdlib-only multipart parsing — no Flask/FastAPI dependency).
+# ---------------------------------------------------------------------------
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25MB sane cap
+UPLOAD_DIR = Path(os.environ.get("AGENT_UPLOADS_DIR", "/tmp/agent_uploads"))
+
+
+def _sanitize_filename(raw: str) -> str:
+    """Strip paths, replace unsafe chars, cap length."""
+    name = Path(raw).name  # kills any "../" traversal
+    name = re.sub(r"[^A-Za-z0-9_.\- ]", "_", name).strip(" .")
+    if not name:
+        name = "upload.bin"
+    return name[:200]
+
+
+def _parse_multipart(body: bytes, boundary: bytes):
+    """Split a multipart body into (field_name, filename|None, payload) parts."""
+    parts = []
+    sep = b"--" + boundary
+    for chunk in body.split(sep):
+        head, marker, payload = chunk.partition(b"\r\n\r\n")
+        if not marker:
+            continue
+        headers = head.decode("latin-1", "replace")
+        if re.fullmatch(r"\s*--\s*", headers.strip()):
+            continue  # trailing "--" epilogue
+        m_name = re.search(r'name="([^"]*)"', headers)
+        m_file = re.search(r'filename="([^"]*)"', headers)
+        if m_file is None and not m_name:
+            continue
+        if payload.endswith(b"\r\n"):
+            payload = payload[:-2]
+        parts.append((
+            m_name.group(1) if m_name else "",
+            m_file.group(1) if m_file else None,
+            payload,
+        ))
+    return parts
 
 # Dashboard: built web UI served as static files (additive — API routes unchanged).
 # `dashboard/dist/` is produced by `npm --prefix dashboard run build`.
@@ -107,6 +149,27 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 return {}
         return {}
+
+    def _raw_body(self, max_bytes: int) -> bytes | None:
+        """Read the raw request body, enforcing a size cap. Returns None if the
+        body is larger than max_bytes (caller should answer 413)."""
+        length = self.headers.get("Content-Length")
+        try:
+            total = int(length) if length else 0
+        except ValueError:
+            total = 0
+        if total > max_bytes:
+            return None
+        if total:
+            return self.rfile.read(total)
+        # No Content-Length: read until EOF with a cap.
+        buf = bytearray()
+        while len(buf) < max_bytes:
+            chunk = self.rfile.read(min(65536, max_bytes - len(buf)))
+            if not chunk:
+                return bytes(buf)
+            buf += chunk
+        return None if self.rfile.read(1) else bytes(buf)
 
     def _serve_dashboard(self, path: str):
         """Serve the built React dashboard (dashboard/dist). No auth — the UI
@@ -208,6 +271,42 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path
         if not check_auth(self):
             return self._json(401, {"error": "unauthorized"})
+
+        if path == "/api/upload":
+            # Multipart file upload — handled before _body() so the raw
+            # multipart payload is never parsed as JSON.
+            audit.record("upload", details={})
+            ctype = self.headers.get("Content-Type", "")
+            m = re.search(r'multipart/form-data;\s*boundary=(?:"([^"]+)"|([^\s;]+))',
+                          ctype, re.IGNORECASE)
+            if not m:
+                return self._json(400, {"error": "multipart/form-data required"})
+            boundary = (m.group(1) or m.group(2)).encode("latin-1")
+            raw = self._raw_body(MAX_UPLOAD_BYTES + 4096)
+            if raw is None:
+                return self._json(413, {"error": "upload exceeds 25MB limit"})
+            file_part = next((p for p in _parse_multipart(raw, boundary)
+                              if p[1]), None)
+            if not file_part:
+                return self._json(400, {"error": "no file field found"})
+            _, raw_name, data = file_part
+            if len(data) > MAX_UPLOAD_BYTES:
+                return self._json(413, {"error": "upload exceeds 25MB limit"})
+            safe = _sanitize_filename(raw_name)
+            try:
+                UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+                dest = UPLOAD_DIR / safe
+                stem, suffix = os.path.splitext(safe)
+                n = 1
+                while dest.exists():
+                    n += 1
+                    dest = UPLOAD_DIR / f"{stem}-{n}{suffix}"
+                dest.write_bytes(data)
+            except OSError as e:
+                return self._json(500, {"error": f"save failed: {e}"[:200]})
+            return self._json(200, {"ok": True, "filename": dest.name,
+                                   "size": len(data), "path": str(dest)})
+
         body = self._body()
 
         if path == "/api/chat":

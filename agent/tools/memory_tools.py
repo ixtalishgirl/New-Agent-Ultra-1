@@ -121,6 +121,35 @@ def _jsonl_all() -> list[dict]:
     return out
 
 
+def record_download(filename: str, url: str,
+                    chat_id: str | None = None,
+                    size: int | None = None) -> None:
+    """Record a browser download in local memory so the agent remembers it.
+
+    Appends a ``{"kind": "download", ...}`` entry to the local memory JSONL
+    (searchable via memory_search) and, best-effort, to the ProjectMemory
+    store. Never raises — callers treat it as fire-and-forget.
+    """
+    entry = {
+        "kind": "download",
+        "filename": filename,
+        "url": url,
+        "chat_id": chat_id,
+        "size": size,
+        "time": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        _jsonl_append(entry)
+    except Exception:
+        pass
+    try:
+        pm = _project_memory()
+        if pm is not None:
+            pm.set(f"downloads::{filename}", json.dumps(entry))
+    except Exception:
+        pass
+
+
 def _macro_path(name: str) -> Path:
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", name):
         raise ValueError(f"Unsafe macro name: {name!r}")
