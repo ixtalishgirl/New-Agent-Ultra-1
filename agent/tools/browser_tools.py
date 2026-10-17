@@ -121,8 +121,33 @@ def main():
         ctx_kwargs["user_agent"] = cfg["user_agent"]
     if cfg.get("proxy"):
         ctx_kwargs["proxy"] = cfg["proxy"]
+    def _find_chrome_binary():
+        """Find a usable Chrome/Chromium binary under the Playwright cache.
+        Playwright's expected path changes across versions (chrome-linux vs
+        chrome-linux64, chromium vs chrome-for-testing), so search directly
+        instead of trusting the versioned path."""
+        import os
+        candidates = []
+        env_p = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+        if env_p:
+            candidates.append(Path(env_p))
+        candidates.append(Path.home() / ".cache" / "ms-playwright")
+        candidates.append(Path("/opt/render/.cache/ms-playwright"))
+        for base in candidates:
+            if not base.is_dir():
+                continue
+            # Prefer full chromium, then headless shell.
+            for pattern in ("chrome", "headless_shell", "chrome-headless-shell"):
+                for f in base.rglob(pattern):
+                    if f.is_file() and os.access(f, os.X_OK):
+                        return str(f)
+        return ""
     def _try_launch(p):
-        browser = p.chromium.launch(**launch_kwargs)
+        exe = _find_chrome_binary()
+        kw = dict(launch_kwargs)
+        if exe:
+            kw["executable_path"] = exe
+        browser = p.chromium.launch(**kw)
         return browser, browser.new_context(**ctx_kwargs)
     try:
         with sync_playwright() as p:
