@@ -140,8 +140,13 @@ def main():
         for base in candidates:
             if not base.is_dir():
                 continue
-            # Prefer full chromium, then headless shell.
-            for pattern in ("chrome", "headless_shell", "chrome-headless-shell"):
+            # Prefer headless_shell (lighter, for 512MB instances), then full chrome.
+            # Set BROWSER_PREFER_FULL=1 to prefer full chromium.
+            prefer_full = os.environ.get("BROWSER_PREFER_FULL", "") == "1"
+            patterns = (("chrome", "headless_shell", "chrome-headless-shell")
+                        if prefer_full else
+                        ("headless_shell", "chrome-headless-shell", "chrome"))
+            for pattern in patterns:
                 for f in base.rglob(pattern):
                     if f.is_file() and os.access(f, os.X_OK):
                         return str(f)
@@ -151,6 +156,10 @@ def main():
         kw = dict(launch_kwargs)
         if exe:
             kw["executable_path"] = exe
+            # headless_shell IS headless; don't pass --headless=new to it.
+            if "headless_shell" in exe:
+                kw["args"] = [a for a in kw["args"] if a != "--headless=new"]
+                kw["headless"] = True
         browser = p.chromium.launch(**kw)
         return browser, browser.new_context(**ctx_kwargs)
     try:
