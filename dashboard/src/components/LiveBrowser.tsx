@@ -30,10 +30,16 @@ export default function LiveBrowser({ visible, onClose }: LiveBrowserProps) {
         if (d.url) {
           setUrl(d.url);
           setInputUrl(d.url);
+        } else {
+          // No page loaded — auto-open Google so it's never a black screen
+          navigate("https://www.google.com");
         }
         if (typeof d.tor === "boolean") setTorOn(d.tor);
       })
-      .catch(() => {});
+      .catch(() => {
+        // If fetch fails, still try to open Google
+        navigate("https://www.google.com");
+      });
   }, [visible]);
 
   if (!visible) return null;
