@@ -216,7 +216,7 @@ class Handler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length) or b"{}")
         except Exception:
             return self._json({"success": False, "error": "bad JSON"}, 400)
-        message = (payload.get("message") or "").strip()
+        message = (payload.get("message") or payload.get("prompt") or "").strip()
         if not message:
             return self._json({"success": False, "error": "empty message"}, 400)
         if parsed.path == "/api/chat/stream":

@@ -174,6 +174,88 @@ export interface IpInfo {
   region?: string;
 }
 
+export interface ChatStreamEvent {
+  type: "token" | "tool" | "round" | "done" | "error";
+  text?: string;
+  name?: string;
+  n?: number;
+  success?: boolean;
+  final_text?: string;
+  reply?: string;
+  tool_calls?: number;
+  browser_used?: boolean;
+  duration_ms?: number;
+  error?: string;
+}
+
+/**
+ * Streaming chat via POST /api/chat/stream (SSE). Tokens arrive live as the
+ * model generates them — the first token typically shows in ~1-2s instead of
+ * waiting minutes for the full reply. Resolves with the final done/error event.
+ */
+export function chatStream(
+  prompt: string,
+  onEvent: (e: ChatStreamEvent) => void,
+  chatId?: string
+): Promise<ChatStreamEvent> {
+  return new Promise((resolve, reject) => {
+    const base = resolveBaseUrl().replace(/\/+$/, "");
+    const password = getStoredPassword();
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (password) headers["x-app-password"] = password;
+    (async () => {
+      let res: Response;
+      try {
+        res = await fetch(base + "/api/chat/stream", {
+          method: "POST",
+          headers,
+          body: JSON.stringify(chatId ? { prompt, chat_id: chatId } : { prompt }),
+        });
+      } catch {
+        reject(new ApiError("offline", 0, "Backend unreachable — is the agent server running?"));
+        return;
+      }
+      if (!res.ok || !res.body) {
+        reject(new ApiError("server", res.status, `Stream failed (${res.status})`));
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let last: ChatStreamEvent = { type: "done", success: false };
+      try {
+        for (;;) {
+          const { done: rd, value } = await reader.read();
+          if (rd) break;
+          buf += decoder.decode(value, { stream: true });
+          let idx: number;
+          while ((idx = buf.indexOf("\n\n")) >= 0) {
+            const chunk = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+            for (const line of chunk.split("\n")) {
+              const t = line.trim();
+              if (!t.startsWith("data:")) continue;
+              const raw = t.slice(5).trim();
+              if (!raw) continue;
+              try {
+                const ev = JSON.parse(raw) as ChatStreamEvent;
+                onEvent(ev);
+                if (ev.type === "done" || ev.type === "error") last = ev;
+              } catch {
+                /* partial chunk — wait for more */
+              }
+            }
+          }
+        }
+      } catch (e) {
+        reject(e instanceof Error ? e : new Error("Stream read failed"));
+        return;
+      }
+      resolve(last);
+    })();
+  });
+}
+
 export const api = {
   async health(): Promise<{ ok: boolean; agent?: string }> {
     return request("/api/health");

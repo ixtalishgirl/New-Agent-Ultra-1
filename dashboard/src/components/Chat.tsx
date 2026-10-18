@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { api, ApiError } from "../api/client";
+import { ApiError, chatStream } from "../api/client";
 import { addEntry } from "../store/history";
 import {
   listSessions,
@@ -213,30 +213,59 @@ export default function Chat({ conn }: { conn: ConnState }) {
       setSessions(listSessions());
     }
     setBusy(true);
+    // Placeholder agent message — reply tokens stream into it LIVE via SSE,
+    // so the first words show in ~1-2s instead of waiting minutes.
+    const agentMsg: ChatMsg = { role: "agent", text: "", time: Date.now() };
+    pushMsgs(sid, [...(getSession(sid)?.messages ?? withUser), agentMsg]);
+    const patchAgent = (fn: (m: ChatMsg) => ChatMsg) => {
+      const cur = getSession(sid)?.messages ?? [];
+      const lastIdx = cur.length - 1;
+      if (lastIdx < 0 || cur[lastIdx].role !== "agent") return;
+      const next = cur.slice();
+      next[lastIdx] = fn(cur[lastIdx]);
+      pushMsgs(sid, next);
+    };
+    // Hide raw <tool_call> JSON while streaming (complete or trailing-partial
+    // blocks); the clean final text replaces everything on done.
+    const cleanStream = (t: string) => t.replace(/<tool_call>[\s\S]*?(<\/tool_call>|$)/g, "").replace(/<final_answer>/g, "");
     try {
-      const res = await api.chat(fullPrompt, sid);
-      // The backend returns {success, final_text, iterations, ...} —
+      let toolCount = 0;
+      const doneEv = await chatStream(
+        fullPrompt,
+        (ev) => {
+          if (ev.type === "token" && ev.text) {
+            const t = ev.text;
+            patchAgent((m) => ({ ...m, text: cleanStream(m.text + t) }));
+          } else if (ev.type === "tool") {
+            toolCount += 1;
+          }
+        },
+        sid
+      );
+      if (doneEv.type === "error") throw new Error(doneEv.error || "Stream failed");
+      // The backend returns {success, final_text, ...} —
       // show ONLY her words, never the raw technical wrapper.
       const reply =
-        (typeof res.final_text === "string" && res.final_text.trim()) ||
-        res.reply ||
-        (res as { response?: string }).response ||
-        "…";
-      const toolCalls = (res.tool_calls as Array<Record<string, unknown>>) || [];
-      const cur = getSession(sid)?.messages ?? withUser;
-      pushMsgs(sid, [...cur, { role: "agent", text: String(reply), time: Date.now(), toolCalls }]);
+        (typeof doneEv.final_text === "string" && doneEv.final_text.trim()) || "…";
+      patchAgent((m) => ({ ...m, text: String(reply) }));
       // Auto-open live browser when the agent browsed — like the assistant's browser.
-      if ((res as any).browser_used) setShowBrowser(true);
+      if (doneEv.browser_used) setShowBrowser(true);
       addEntry({
         kind: "chat",
-        status: res.success === false ? "error" : "ok",
+        status: doneEv.success === false ? "error" : "ok",
         title: titleSeed.slice(0, 80),
-        detail: `reply ${String(reply).length} chars · ${toolCalls.length} tool call(s)`,
+        detail: `reply ${String(reply).length} chars · ${toolCount} tool call(s)`,
       });
     } catch (e) {
-      const msg = e instanceof ApiError ? e.message : "Request failed";
-      const cur = getSession(sid)?.messages ?? withUser;
-      pushMsgs(sid, [...cur, { role: "error", text: msg, time: Date.now() }]);
+      const msg = e instanceof ApiError ? e.message : e instanceof Error ? e.message : "Request failed";
+      // Replace the empty streaming placeholder with the error.
+      const cur = getSession(sid)?.messages ?? [];
+      const lastIdx = cur.length - 1;
+      if (lastIdx >= 0 && cur[lastIdx].role === "agent" && !cur[lastIdx].text.trim()) {
+        pushMsgs(sid, [...cur.slice(0, lastIdx), { role: "error", text: msg, time: Date.now() }]);
+      } else {
+        pushMsgs(sid, [...cur, { role: "error", text: msg, time: Date.now() }]);
+      }
       addEntry({ kind: "chat", status: "error", title: titleSeed.slice(0, 80), detail: msg });
     } finally {
       setBusy(false);
