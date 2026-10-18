@@ -788,6 +788,84 @@ def tool_flaresolverr_fetch(url: str, solver_url: str = "http://localhost:8191")
         return _err(f"FlareSolverr failed (is it running at {solver_url}?): {e}")
 
 
+def tool_api_discover(url: str, timeout: int = 30) -> dict:
+    """Discover hidden APIs: check sitemap.xml, robots.txt, JS bundles for endpoints/tokens."""
+    try:
+        import re, urllib.request
+        from urllib.parse import urljoin, urlparse
+        base = f"{urlparse(url).scheme}://{urlparse(url).netloc}"
+        found = {"sitemap": [], "robots": "", "js_endpoints": [], "apis": []}
+        # robots.txt
+        try:
+            with urllib.request.urlopen(base + "/robots.txt", timeout=10) as r:
+                found["robots"] = r.read().decode()[:2000]
+        except: pass
+        # sitemap.xml
+        try:
+            with urllib.request.urlopen(base + "/sitemap.xml", timeout=10) as r:
+                txt = r.read().decode()[:5000]
+                found["sitemap"] = re.findall(r"<loc>(.*?)</loc>", txt)[:20]
+        except: pass
+        # Fetch page, find JS bundles, extract endpoints
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as r:
+                html = r.read().decode()
+            js_urls = re.findall(r'src="([^"]*\.js[^"]*)"', html)[:10]
+            for js in js_urls:
+                js_url = urljoin(url, js)
+                try:
+                    with urllib.request.urlopen(js_url, timeout=10) as jr:
+                        js_txt = jr.read().decode()[:50000]
+                    # Find API endpoints, tokens
+                    eps = re.findall(r'["\'](/[a-zA-Z0-9/_\-\.]+(?:api|v1|v2|graphql)[^"\']*)["\']', js_txt)
+                    keys = re.findall(r'["\'](?:api[_-]?key|token|bearer)["\']\s*[:=]\s*["\']([^"\']+)["\']', js_txt, re.I)
+                    found["js_endpoints"].extend(eps[:10])
+                    found["apis"].extend(keys[:5])
+                except: pass
+        except Exception as e:
+            return _err(e)
+        return _ok(**found)
+    except Exception as e:
+        return _err(e)
+
+def tool_graphql_introspect(endpoint: str, timeout: int = 30) -> dict:
+    """Run GraphQL introspection to discover schema."""
+    try:
+        import json, urllib.request
+        q = {"query": "{ __schema { queryType { fields { name } } mutationType { fields { name } } } }"}
+        req = urllib.request.Request(endpoint, data=json.dumps(q).encode(),
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            d = json.loads(r.read().decode())
+        schema = d.get("data", {}).get("__schema", {})
+        queries = [f["name"] for f in (schema.get("queryType", {}) or {}).get("fields", []) or []]
+        mutations = [f["name"] for f in (schema.get("mutationType", {}) or {}).get("fields", []) or []]
+        return _ok(queries=queries[:50], mutations=mutations[:50])
+    except Exception as e:
+        return _err(e)
+
+def tool_crawl_paginated(base_url: str, param: str = "page", max_pages: int = 10, timeout: int = 30) -> dict:
+    """Crawl paginated URLs: base_url?page=1..N, collect all data (chapa chapa chana)."""
+    try:
+        import urllib.request
+        from urllib.parse import urlencode
+        all_data = []
+        for p in range(1, max_pages + 1):
+            sep = "&" if "?" in base_url else "?"
+            url = f"{base_url}{sep}{param}={p}"
+            try:
+                with urllib.request.urlopen(url, timeout=timeout) as r:
+                    txt = r.read().decode()
+                    if not txt.strip() or len(txt) < 100:
+                        break
+                    all_data.append({"page": p, "size": len(txt), "text": txt[:3000]})
+            except:
+                break
+        return _ok(pages_crawled=len(all_data), data=all_data)
+    except Exception as e:
+        return _err(e)
+
+
 REGISTRY = {
     "tool_create": (tool_create, "CREATE a brand-new tool from Python code defining run(**kwargs)->dict, then USE it immediately.",
                     {"name": "str (required, new tool name)", "code": "str (required, must define run)", "description": "str"}),
@@ -859,6 +937,12 @@ REGISTRY = {
                        {"url": "str (required)", "impersonate": "str, default 'chrome120'", "timeout": "int, default 30"}),
     "flaresolverr_fetch": (tool_flaresolverr_fetch, "Fetch via FlareSolverr (solves Cloudflare JS challenges).",
                           {"url": "str (required)", "solver_url": "str, default 'http://localhost:8191'"}),
+    "api_discover": (tool_api_discover, "Discover hidden APIs: sitemap, robots.txt, JS bundle endpoints/tokens.",
+                    {"url": "str (required)", "timeout": "int, default 30"}),
+    "graphql_introspect": (tool_graphql_introspect, "GraphQL introspection to discover schema.",
+                          {"endpoint": "str (required)", "timeout": "int, default 30"}),
+    "crawl_paginated": (tool_crawl_paginated, "Crawl paginated URLs thoroughly (chapa chapa chana).",
+                       {"base_url": "str (required)", "param": "str, default 'page'", "max_pages": "int, default 10", "timeout": "int, default 30"}),
     "questionnaire": (tool_questionnaire, "Build a structured questionnaire for the user to answer.",
                       {"questions": "list (required)", "title": "str, default 'Questionnaire'"}),
 }
