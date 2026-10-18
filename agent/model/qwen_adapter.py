@@ -17,7 +17,7 @@ class QwenAdapter(ModelProvider):
     CHAT_PATH = "/v1/chat/completions"
     MODEL_NAME = "deepseek"
 
-    def __init__(self, base_url: str, timeout: int = 120):
+    def __init__(self, base_url: str, timeout: int = 300):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
 
@@ -40,7 +40,7 @@ class QwenAdapter(ModelProvider):
             raise RuntimeError(f"Model endpoint unreachable: {url}: {e}")
 
     def generate(self, system_prompt: str, user_prompt: str,
-                 max_tokens: int = 2048) -> ModelResponse:
+                 max_tokens: int = 512) -> ModelResponse:
         result = self._post(self.CHAT_PATH, {
             "model": self.MODEL_NAME,
             "messages": [
