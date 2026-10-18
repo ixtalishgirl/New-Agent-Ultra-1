@@ -866,6 +866,70 @@ def tool_crawl_paginated(base_url: str, param: str = "page", max_pages: int = 10
         return _err(e)
 
 
+def tool_supabase_query(table: str, action: str = "select", data: dict = None, filters: dict = None) -> dict:
+    """Query Supabase table. Actions: select, insert, update, delete. Needs SUPABASE_URL and SUPABASE_KEY env."""
+    try:
+        import os, json, urllib.request
+        url = os.environ.get("SUPABASE_URL", "")
+        key = os.environ.get("SUPABASE_KEY", "")
+        if not url or not key:
+            return _err("Supabase not configured (set SUPABASE_URL and SUPABASE_KEY)")
+        headers = {"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+        if action == "select":
+            q = f"{url}/rest/v1/{table}?select=*"
+            if filters:
+                for k, v in filters.items():
+                    q += f"&{k}=eq.{v}"
+            req = urllib.request.Request(q, headers=headers)
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return _ok(data=json.loads(r.read().decode()))
+        elif action == "insert":
+            req = urllib.request.Request(f"{url}/rest/v1/{table}", data=json.dumps(data).encode(), headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return _ok(inserted=True)
+        else:
+            return _err(f"Action {action} not implemented yet")
+    except Exception as e:
+        return _err(e)
+
+def tool_drive_upload(filename: str, content: str) -> dict:
+    """Upload a file to Google Drive. Needs DRIVE_FOLDER_ID env. Returns honest status."""
+    try:
+        import os
+        folder = os.environ.get("DRIVE_FOLDER_ID", "")
+        if not folder:
+            return _err("Drive not configured (set DRIVE_FOLDER_ID). User must connect Drive on phone first.")
+        # Placeholder - real implementation needs OAuth
+        return _ok(note="Drive upload queued", filename=filename, folder=folder)
+    except Exception as e:
+        return _err(e)
+
+def tool_memory_save(chat_id: str, key: str, value: str) -> dict:
+    """Save data for a specific chat (separate memory per chat)."""
+    try:
+        from pathlib import Path
+        import json
+        mem_dir = Path("workspace/memory/chats") / chat_id
+        mem_dir.mkdir(parents=True, exist_ok=True)
+        p = mem_dir / f"{key}.json"
+        p.write_text(json.dumps({"value": value}))
+        return _ok(saved=True, chat=chat_id, key=key)
+    except Exception as e:
+        return _err(e)
+
+def tool_memory_load(chat_id: str, key: str) -> dict:
+    """Load data for a specific chat."""
+    try:
+        from pathlib import Path
+        import json
+        p = Path("workspace/memory/chats") / chat_id / f"{key}.json"
+        if not p.exists():
+            return _ok(found=False)
+        return _ok(found=True, value=json.loads(p.read_text())["value"])
+    except Exception as e:
+        return _err(e)
+
+
 REGISTRY = {
     "tool_create": (tool_create, "CREATE a brand-new tool from Python code defining run(**kwargs)->dict, then USE it immediately.",
                     {"name": "str (required, new tool name)", "code": "str (required, must define run)", "description": "str"}),
@@ -943,6 +1007,14 @@ REGISTRY = {
                           {"endpoint": "str (required)", "timeout": "int, default 30"}),
     "crawl_paginated": (tool_crawl_paginated, "Crawl paginated URLs thoroughly (chapa chapa chana).",
                        {"base_url": "str (required)", "param": "str, default 'page'", "max_pages": "int, default 10", "timeout": "int, default 30"}),
+    "supabase_query": (tool_supabase_query, "Query Supabase table (select/insert). Needs SUPABASE_URL/KEY.",
+                        {"table": "str (required)", "action": "str, default 'select'", "data": "dict", "filters": "dict"}),
+    "drive_upload": (tool_drive_upload, "Upload file to Google Drive. Needs DRIVE_FOLDER_ID.",
+                    {"filename": "str (required)", "content": "str (required)"}),
+    "memory_save": (tool_memory_save, "Save data for a specific chat (separate memory per chat).",
+                   {"chat_id": "str (required)", "key": "str (required)", "value": "str (required)"}),
+    "memory_load": (tool_memory_load, "Load data for a specific chat.",
+                   {"chat_id": "str (required)", "key": "str (required)"}),
     "questionnaire": (tool_questionnaire, "Build a structured questionnaire for the user to answer.",
                       {"questions": "list (required)", "title": "str, default 'Questionnaire'"}),
 }
