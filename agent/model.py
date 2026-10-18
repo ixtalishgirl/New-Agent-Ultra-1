@@ -50,7 +50,10 @@ def chat(messages: list, max_tokens: int = MAX_TOKENS,
     except urllib.error.URLError as e:
         raise RuntimeError(f"model unreachable at {BASE_URL}: {e}")
     try:
-        return out["choices"][0]["message"]["content"] or ""
+        msg = out["choices"][0]["message"]
+        # DeepSeek-R1 distills put their reply in reasoning_content and may
+        # leave content empty — fall back so chat never returns blank.
+        return msg.get("content") or msg.get("reasoning_content") or ""
     except (KeyError, IndexError, TypeError):
         raise RuntimeError(f"unexpected model response: {str(out)[:300]}")
 
@@ -96,11 +99,14 @@ def chat_stream(messages: list, max_tokens: int = MAX_TOKENS,
             if data_s == "[DONE]":
                 break
             try:
-                delta = json.loads(data_s)["choices"][0]["delta"].get("content")
+                delta = json.loads(data_s)["choices"][0]["delta"]
+                # DeepSeek-R1 distills stream their reply as
+                # reasoning_content; fall back so streaming never goes blank.
+                tok = delta.get("content") or delta.get("reasoning_content")
             except (KeyError, IndexError, TypeError, ValueError):
                 continue
-            if delta:
-                yield delta
+            if tok:
+                yield tok
     finally:
         resp.close()
 
