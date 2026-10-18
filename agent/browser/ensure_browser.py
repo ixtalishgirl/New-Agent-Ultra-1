@@ -65,9 +65,9 @@ def ensure_browser_installed(timeout: int = 420) -> tuple[bool, str]:
         return False, "browser install already attempted in this process and failed"
     _tried[key] = True
     last_err = ""
-    # Full chromium FIRST (daemon uses --headless=new with it), then
-    # headless-shell as a fallback.
-    for extra in (["chromium"], ["--only-shell", "chromium"]):
+    # headless-shell FIRST (we launch with channel="chromium-headless-shell",
+    # lighter ~100MB), then full chromium as fallback.
+    for extra in (["--only-shell", "chromium"], ["chromium"]):
         try:
             proc = subprocess.run(
                 [sys.executable, "-m", "playwright", "install", *extra],
