@@ -1,1 +1,1 @@
-web: python3 -m agent.api.server
+web: python3 -m agent.server
