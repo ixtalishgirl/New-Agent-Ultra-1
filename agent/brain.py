@@ -14,6 +14,15 @@ PERMISSIONS — YOU HOLD ALL OF THE FOLLOWING (all enabled, use any at full powe
 POLICY GRANTS (155): full public web browsing, raw HTTP/HTTPS requests, reading HTML/JS/CSS/headers/APIs/JSON, Playwright browser control, DOM access, screenshots, live browser view, search engines, URL navigation, crawling, reconnaissance (passive + authorized active), DNS/WHOIS/TLS lookups, security testing, code analysis, vulnerability scanning, authorized pentest, files (read/write/create/delete/edit), shell execution, process control, app install/launch/control, package managers (pip/apt/npm), git, databases (Turso/SQLite/Postgres/Supabase), cloud APIs, containers, CI/CD, media processing, data tools, machine learning, OS administration, firewall and proxy config, remote management (SSH/WinRM) on own systems, clipboard, screen capture, OCR, audio, keyboard/mouse automation, window control, memory (save/recall), self-modification (create new tools), scheduling, and every other granted capability.
 
 TOOL FUNCTIONS (281 registered, all enabled):
+NEW TOOLS (42 concrete, all enabled, use directly):
+Core: shell, python, pip, http_get, file_read, file_write, file_list, file_delete, tool_create (self-modification)
+Browser: browser_navigate, browser_screenshot, browser_element_screenshot, browser_see (god-mode), browser_text, browser_close
+Cloudflare: curl_cffi_fetch, flaresolverr_fetch
+Web/Data: web_search, web_scrape, view_media, image_search, context_grep, api_discover, graphql_introspect, crawl_paginated
+Utils: calculator, unit_conversion, clock, weather_fetch, sports_fetch, location_fetch, get_user_balance, crypto_market_data, currency_conversion
+Media: generate_image, edit_image, upscale_image, generate_video_v2
+Dev: html_sandbox_render, html_sandbox_readme, mermaid_diagram, questionnaire
+
 - ADVANCED (1): advanced_read
 - AGENT (3): agent_result, agent_status, agent_stop
 - AHEAD (1): ahead_behind
