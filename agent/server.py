@@ -6,6 +6,7 @@ Endpoints:
   POST /api/chat              -> {"message": "..."} -> model + tools -> {"success","final_text",...}
   GET  /api/browser/stream    -> MJPEG live browser view (5 fps, 800x600)
   GET  /api/browser/current   -> {"url": ...} of the live browser page
+  POST /api/chat/stream       -> SSE stream: token/tool/round/done events (fast)
   GET  /                      -> dashboard UI (dashboard/dist) if present
 
 Flow per chat message (no bloat, no queues):
@@ -54,8 +55,14 @@ def parse_final(text: str) -> str | None:
     return m.group(1).strip() if m else None
 
 
-def run_chat(message: str) -> dict:
-    """One message in, final answer out. Raises on model failure."""
+def run_chat(message: str, on_event=None) -> dict:
+    """One message in, final answer out. Raises on model failure.
+
+    on_event(dict) is called live with {"type": "token", "text": ...} for
+    every generated token, {"type": "tool", "name": ...} before each tool
+    runs, and {"type": "round", "n": ...} per model round — so the client
+    can stream the reply instead of waiting for the whole thing.
+    """
     t0 = time.time()
     system = brain.build_system_prompt()
     tool_desc = tools.describe_tools()
@@ -67,9 +74,16 @@ def run_chat(message: str) -> dict:
     browser_used = False
     total_calls = 0
     final_text = ""
-    for _ in range(MAX_ROUNDS):
+    for rnd in range(MAX_ROUNDS):
+        if on_event:
+            on_event({"type": "round", "n": rnd + 1})
+        parts = []
         try:
-            reply = model_client.chat(messages)
+            for tok in model_client.chat_stream(messages):
+                parts.append(tok)
+                if on_event:
+                    on_event({"type": "token", "text": tok})
+            reply = "".join(parts)
         except RuntimeError as e:
             return {"success": False, "error": str(e)[:500],
                     "duration_ms": int((time.time() - t0) * 1000)}
@@ -83,6 +97,8 @@ def run_chat(message: str) -> dict:
             total_calls += 1
             if name.startswith("browser"):
                 browser_used = True
+            if on_event:
+                on_event({"type": "tool", "name": name})
             res = tools.execute_tool(name, args)
             # Keep tool results compact for the model context.
             res_s = json.dumps(res)
@@ -193,7 +209,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        if parsed.path != "/api/chat":
+        if parsed.path not in ("/api/chat", "/api/chat/stream"):
             return self._json({"error": "not found"}, 404)
         try:
             length = int(self.headers.get("Content-Length", 0))
@@ -203,11 +219,48 @@ class Handler(BaseHTTPRequestHandler):
         message = (payload.get("message") or "").strip()
         if not message:
             return self._json({"success": False, "error": "empty message"}, 400)
+        if parsed.path == "/api/chat/stream":
+            return self._sse_chat(message)
         try:
             result = run_chat(message)
         except Exception as e:
             result = {"success": False, "error": str(e)[:500]}
         self._json(result)
+
+    def _sse_chat(self, message: str):
+        """Server-sent events: streams tokens live as the model generates.
+
+        Events: {"type":"token","text":...}, {"type":"tool","name":...},
+        {"type":"round","n":...}, then {"type":"done",...} or {"type":"error",...}.
+        First token reaches the client in ~1-2s instead of waiting minutes
+        for the full reply.
+        """
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        alive = {"ok": True}
+
+        def emit(obj):
+            if not alive["ok"]:
+                return
+            try:
+                self.wfile.write(("data: " + json.dumps(obj) + "\n\n").encode())
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                alive["ok"] = False
+
+        try:
+            result = run_chat(message, on_event=emit)
+            if alive["ok"]:
+                emit({"type": "done", "success": result.get("success", False),
+                      "final_text": result.get("final_text", ""),
+                      "tool_calls": result.get("tool_calls", 0),
+                      "browser_used": result.get("browser_used", False),
+                      "duration_ms": result.get("duration_ms", 0)})
+        except Exception as e:
+            emit({"type": "error", "error": str(e)[:500]})
 
 
 def main():

@@ -55,6 +55,56 @@ def chat(messages: list, max_tokens: int = MAX_TOKENS,
         raise RuntimeError(f"unexpected model response: {str(out)[:300]}")
 
 
+def chat_stream(messages: list, max_tokens: int = MAX_TOKENS,
+               timeout: int = TIMEOUT):
+    """Yield content deltas as the model generates them (SSE).
+
+    Raises RuntimeError on failure — callers decide how to surface it.
+    First token typically arrives in ~1-2s; the caller streams it straight
+    to the user instead of waiting for the full reply.
+    """
+    if not BASE_URL:
+        raise RuntimeError("HALEY_API_URL is not set — model unreachable.")
+    payload = {
+        "model": "agent",
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": 0.7,
+        "stream": True,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        BASE_URL + CHAT_PATH, data=data,
+        headers={"Content-Type": "application/json",
+                 "Accept": "text/event-stream",
+                 "ngrok-skip-browser-warning": "true"},
+        method="POST",
+    )
+    try:
+        resp = urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", "replace")[:300]
+        raise RuntimeError(f"model HTTP {e.code}: {body}")
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"model unreachable at {BASE_URL}: {e}")
+    try:
+        for raw in resp:
+            line = raw.decode("utf-8", "replace").strip()
+            if not line.startswith("data:"):
+                continue
+            data_s = line[5:].strip()
+            if data_s == "[DONE]":
+                break
+            try:
+                delta = json.loads(data_s)["choices"][0]["delta"].get("content")
+            except (KeyError, IndexError, TypeError, ValueError):
+                continue
+            if delta:
+                yield delta
+    finally:
+        resp.close()
+
+
 def health() -> bool:
     """Quick check that the model endpoint answers."""
     if not BASE_URL:
