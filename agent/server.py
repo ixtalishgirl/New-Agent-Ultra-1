@@ -6,8 +6,8 @@ Endpoints:
   POST /api/chat              -> {"message": "..."} -> model + tools -> {"success","final_text",...}
   GET  /api/browser/stream    -> MJPEG live browser view (5 fps, 800x600)
   GET  /api/browser/current   -> {"url": ...} of the live browser page
-  GET  /api/permissions       -> 552 permissions + 5 locked denials (with operator overrides)
-  POST /api/permissions/toggle -> {"name","enabled"} operator override (5 locked can never flip)
+  GET  /api/permissions       -> 552 permissions (with operator overrides)
+  POST /api/permissions/toggle -> {"name","enabled"} operator override
   GET  /api/tunnel/status     -> model tunnel (ngrok URL, reachability)
   POST /api/tools/execute     -> {"name","args"} run one of the 46 tools (denials enforced)
   POST /api/upload            -> multipart file upload, 25MB cap, into <workspace>/uploads
@@ -47,8 +47,8 @@ FINAL_RE = re.compile(r"<final_answer>(.*?)</final_answer>", re.DOTALL)
 
 DASHBOARD_DIR = Path(__file__).resolve().parent.parent / "dashboard" / "dist"
 
-# The 552 trained permissions + 5 locked denials, bundled with the server.
-# Format per line: "<name>: True|False". False entries are locked forever.
+# The 552 trained permissions, bundled with the server.
+# Format per line: "<name>: True|False".
 PERM_FILE = Path(__file__).resolve().parent / "permissions_full.txt"
 
 
@@ -349,7 +349,7 @@ class Handler(BaseHTTPRequestHandler):
         """POST /api/tools/execute {name, args} — run one of the 46 tools.
 
         Used by the dashboard Tools tab, the live-browser panel, and the
-        Permissions/Config tabs. The 5 locked denials stay enforced here.
+        Permissions/Config tabs.
         """
         try:
             length = int(self.headers.get("Content-Length", 0))
@@ -402,8 +402,7 @@ class Handler(BaseHTTPRequestHandler):
     def _perm_toggle(self):
         """POST /api/permissions/toggle {name, enabled} — operator override.
 
-        The 5 locked denials can never be flipped. Everything else records
-        an override that run_chat() injects into the system prompt at
+        Records an override that run_chat() injects into the system prompt at
         highest priority (the real enforcement in this architecture).
         """
         try:

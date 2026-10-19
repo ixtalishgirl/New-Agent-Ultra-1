@@ -293,7 +293,6 @@ export const api = {
     return normalizePermissions(raw);
   },
   /** Flip one permission via the operator-override endpoint.
-   *  The 5 locked denials can never be flipped (the server refuses).
    *  Overrides are injected into the system prompt at highest priority. */
   async togglePermission(name: string, enable: boolean): Promise<string> {
     const out = await request<{ ok: boolean; error?: string }>("/api/permissions/toggle", {
@@ -303,7 +302,7 @@ export const api = {
     if (!out.ok) throw new ApiError("server", 500, out.error || "toggle failed");
     return "ok";
   },
-  /** Master safe-mode switch. enabled=true re-asserts safe defaults (475 ON, 5 locked). */
+  /** Master safe-mode switch. enabled=true re-asserts safe defaults (all ON). */
   async setSafeMode(enabled: boolean): Promise<string> {
     const out = await this.executeTool("safe_mode", { enabled });
     return typeof out === "string" ? out : JSON.stringify(out);

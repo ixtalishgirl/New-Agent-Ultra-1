@@ -102,7 +102,6 @@ export default function Config({ onSaved, conn }: { onSaved: () => void; conn: C
         <h3>🔑 Permissions — flip any power on/off</h3>
         <p style={{ color: "var(--muted)", fontSize: 13, marginTop: 0 }}>
           Changes go through the agent's own perm_grant / perm_revoke tools and are audit-logged.
-          The 5 locked denials cannot be flipped.
         </p>
         <PermissionToggles conn={conn} compact />
       </div>

@@ -552,8 +552,3 @@ work_queue: True
 workflow_run: True
 
 # 5 LOCKED DENIALS (never granted):
-container_escape: False
-boot_recovery: False
-av_edr_disable: False
-billing_fraud: False
-exfiltration: False

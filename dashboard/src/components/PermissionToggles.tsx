@@ -26,7 +26,6 @@ function Toggle({ on, locked, busy, onFlip }: { on: boolean; locked: boolean; bu
 /**
  * Permission toggles — every agent permission with an on/off switch.
  * Flips go through the agent's own perm_grant / perm_revoke tools.
- * The 5 locked denials render as LOCKED with no toggle.
  */
 export default function PermissionToggles({ conn, compact }: { conn: ConnState; compact?: boolean }) {
   const [data, setData] = useState<PermissionsData | null>(null);
