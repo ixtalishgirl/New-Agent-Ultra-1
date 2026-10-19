@@ -210,7 +210,7 @@ def _browser_worker_main(q):
     page.set_default_timeout(15000)
     page.set_default_navigation_timeout(15000)
 
-    state = {"pw": pw, "browser": browser, "page": page}
+    state = {"pw": pw, "browser": browser, "context": ctx, "page": page}
     while True:
         job = q.get()
         try:
@@ -344,6 +344,61 @@ def _frame_impl(state, quality):
     return page.screenshot(type="jpeg", quality=quality)
 
 
+def _js_impl(state, script):
+    page = state["page"]
+    result = page.evaluate(script)
+    return {"url": page.url, "result": str(result)[:2000]}
+
+
+def _press_impl(state, key, selector, timeout):
+    page = state["page"]
+    if selector:
+        el = page.locator(selector).first
+        el.wait_for(state="visible", timeout=timeout * 1000)
+        el.press(key, timeout=timeout * 1000)
+    else:
+        page.keyboard.press(key)
+    page.wait_for_timeout(800)
+    return {"url": page.url, "pressed": key}
+
+
+def _wait_impl(state, selector, timeout):
+    page = state["page"]
+    if selector:
+        page.locator(selector).first.wait_for(state="visible", timeout=timeout * 1000)
+        return {"url": page.url, "waited_for": selector, "found": True}
+    else:
+        page.wait_for_timeout(timeout * 1000)
+        return {"url": page.url, "waited_ms": timeout * 1000}
+
+
+def _new_tab_impl(state, url):
+    ctx = state["context"]
+    page = ctx.new_page()
+    if url:
+        page.goto(url, timeout=30000, wait_until="domcontentloaded")
+    state["page"] = page
+    return {"url": page.url, "title": page.title()[:200], "tabs": len(ctx.pages)}
+
+
+def _tabs_impl(state):
+    ctx = state["context"]
+    tabs = []
+    for i, p in enumerate(ctx.pages):
+        tabs.append({"index": i, "url": p.url, "title": p.title()[:100],
+                     "active": p == state["page"]})
+    return {"tabs": tabs}
+
+
+def _switch_tab_impl(state, index):
+    ctx = state["context"]
+    pages = ctx.pages
+    if 0 <= index < len(pages):
+        state["page"] = pages[index]
+        return {"url": pages[index].url, "switched_to": index}
+    return {"error": f"tab index {index} out of range (0-{len(pages)-1})"}
+
+
 def _shutdown_impl(state):
     try:
         state["browser"].close()
@@ -448,6 +503,54 @@ def tool_browser_fill(selector: str, text: str, timeout: int = 10) -> dict:
     """Fill a form field (CSS selector) with text. Waits for it to be visible first."""
     try:
         return _ok(**_browser_call(_fill_impl, selector, text, timeout))
+    except Exception as e:
+        return _err(e)
+
+
+def tool_browser_js(script: str) -> dict:
+    """Execute JavaScript in the page. Returns the result (truncated)."""
+    try:
+        return _ok(**_browser_call(_js_impl, script))
+    except Exception as e:
+        return _err(e)
+
+
+def tool_browser_press(key: str, selector: str = "", timeout: int = 10) -> dict:
+    """Press a keyboard key (e.g. Enter, Tab, Escape). If selector given, focuses that element first."""
+    try:
+        return _ok(**_browser_call(_press_impl, key, selector, timeout))
+    except Exception as e:
+        return _err(e)
+
+
+def tool_browser_wait(selector: str = "", timeout: int = 10) -> dict:
+    """Wait for an element (CSS selector) to appear, or just wait N seconds if no selector."""
+    try:
+        return _ok(**_browser_call(_wait_impl, selector, timeout))
+    except Exception as e:
+        return _err(e)
+
+
+def tool_browser_new_tab(url: str = "") -> dict:
+    """Open a new tab (optionally navigate to URL) and switch to it."""
+    try:
+        return _ok(**_browser_call(_new_tab_impl, url))
+    except Exception as e:
+        return _err(e)
+
+
+def tool_browser_tabs() -> dict:
+    """List all open tabs with URLs and titles."""
+    try:
+        return _ok(**_browser_call(_tabs_impl))
+    except Exception as e:
+        return _err(e)
+
+
+def tool_browser_switch_tab(index: int) -> dict:
+    """Switch to a tab by index (see browser_tabs)."""
+    try:
+        return _ok(**_browser_call(_switch_tab_impl, index))
     except Exception as e:
         return _err(e)
 
@@ -1204,6 +1307,17 @@ REGISTRY = {
                       {"selector": "str (required, CSS)", "timeout": "int seconds, default 10"}),
     "browser_fill": (tool_browser_fill, "Fill a form field by CSS selector with text. Waits for visibility first.",
                      {"selector": "str (required, CSS)", "text": "str (required)", "timeout": "int seconds, default 10"}),
+    "browser_js": (tool_browser_js, "Execute JavaScript in the page. Returns result (truncated).",
+                   {"script": "str (required, JS code)"}),
+    "browser_press": (tool_browser_press, "Press a keyboard key (Enter, Tab, Escape, etc.). Focuses selector first if given.",
+                      {"key": "str (required)", "selector": "str (optional, CSS)", "timeout": "int seconds, default 10"}),
+    "browser_wait": (tool_browser_wait, "Wait for element (CSS) to appear, or wait N seconds if no selector.",
+                     {"selector": "str (optional, CSS)", "timeout": "int seconds, default 10"}),
+    "browser_new_tab": (tool_browser_new_tab, "Open a new tab (optionally to a URL) and switch to it.",
+                        {"url": "str (optional)"}),
+    "browser_tabs": (tool_browser_tabs, "List all open tabs with URLs and titles.", {}),
+    "browser_switch_tab": (tool_browser_switch_tab, "Switch to tab by index (see browser_tabs).",
+                           {"index": "int (required)"}),
     "browser_close": (tool_browser_close, "Close the browser.", {}),
     "web_search": (tool_web_search, "Web search (DuckDuckGo, no key). Returns titles/URLs/snippets.",
                   {"query": "str (required)", "max_results": "int, default 8"}),
