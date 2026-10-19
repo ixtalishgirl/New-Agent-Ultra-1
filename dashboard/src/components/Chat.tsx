@@ -336,7 +336,7 @@ export default function Chat({ conn }: { conn: ConnState }) {
 
   return (
     <div className="chat-wrap">
-      {/* chat header: sessions drawer toggle, auto title, new chat (+) */}
+      {/* chat header: sessions drawer toggle, auto title, new chat (+), browser (🌐) */}
       <div className="chat-topbar">
         <button className="icon-btn" onClick={() => setDrawer((d) => !d)} title="Chats">
           ☰
@@ -344,6 +344,14 @@ export default function Chat({ conn }: { conn: ConnState }) {
         <div className="chat-title" title={active?.title ?? "New chat"}>
           {active?.title ?? "New chat"}
         </div>
+        <button
+          className="icon-btn"
+          onClick={() => setShowBrowser((v) => !v)}
+          title={showBrowser ? "Browser band karo" : "Browser kholo (live)"}
+          style={showBrowser ? { borderColor: "var(--accent)" } : undefined}
+        >
+          🌐
+        </button>
         <button className="icon-btn new-chat" onClick={newChat} title="New chat">
           ＋
         </button>
