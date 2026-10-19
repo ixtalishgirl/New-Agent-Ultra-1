@@ -150,8 +150,200 @@ def tool_file_delete(path: str, confirm: bool = False) -> dict:
 # ---- Browser (Playwright, lazy import so server starts fast) ----
 # SPEED OPTIMIZED: headless-shell (lightest build), minimal args, single reused
 # instance, images/fonts/media blocked by default, 15s page timeout.
+#
+# THREADING: Playwright's sync API is NOT thread-safe — its objects must be
+# used in the thread that created them. ThreadingHTTPServer serves each HTTP
+# request in its own thread, so ALL browser work runs in ONE dedicated worker
+# thread. Tool functions submit jobs through a queue and wait for results.
 
-_browser = None
+import queue as _queue
+import threading as _threading
+
+_browser_queue: _queue.Queue | None = None
+_browser_worker: _threading.Thread | None = None
+_browser_lock = _threading.Lock()
+
+
+class _WorkerExit(Exception):
+    """Raised inside the worker to shut it down cleanly."""
+
+
+def _browser_worker_main(q):
+    """Owns pw/browser/page forever; runs jobs from the queue."""
+    from playwright.sync_api import sync_playwright
+    pw = sync_playwright().start()
+    browser = None
+    last_err = None
+    launch_args = [
+        "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
+        "--disable-extensions", "--disable-background-networking",
+        "--disable-sync", "--mute-audio",
+    ]
+    for kwargs in ({"channel": "chromium-headless-shell"}, {}):
+        try:
+            browser = pw.chromium.launch(headless=True, args=launch_args, **kwargs)
+            break
+        except Exception as e:
+            last_err = e
+            if "Executable doesn't exist" in str(e) or "executable" in str(e).lower():
+                if _ensure_browser_binary():
+                    try:
+                        browser = pw.chromium.launch(headless=True, args=launch_args, **kwargs)
+                        break
+                    except Exception as e2:
+                        last_err = e2
+    if browser is None:
+        while True:  # fail every job fast; a later call retries via reset
+            job = q.get()
+            job["reply"].put((False, RuntimeError(f"browser launch failed: {last_err}")))
+        return
+    ctx = browser.new_context(viewport={"width": 800, "height": 600})
+    page = ctx.new_page()
+
+    # Block heavy resources by default — pages load 3-5x faster.
+    def _route(route):
+        if route.request.resource_type in ("image", "font", "media"):
+            route.abort()
+        else:
+            route.continue_()
+    page.route("**/*", _route)
+    page.set_default_timeout(15000)
+    page.set_default_navigation_timeout(15000)
+
+    state = {"pw": pw, "browser": browser, "page": page}
+    while True:
+        job = q.get()
+        try:
+            job["reply"].put((True, job["fn"](state, *job["args"], **job["kwargs"])))
+        except _WorkerExit:
+            try:
+                job["reply"].put((True, {"closed": True}))
+            except Exception:
+                pass
+            break
+        except Exception as e:
+            job["reply"].put((False, e))
+
+
+def _browser_dead(err: Exception) -> bool:
+    msg = str(err).lower()
+    return any(k in msg for k in (
+        "connection closed", "browser has been closed", "target crashed",
+        "browser launch failed", "playwright connection",
+    ))
+
+
+def _browser_call(fn, *args, **kwargs):
+    """Run fn(state, *args, **kwargs) in the browser worker thread.
+
+    Starts the worker on first use. If the browser died, resets so the
+    next call relaunches it.
+    """
+    global _browser_queue, _browser_worker
+    with _browser_lock:
+        if _browser_worker is None or not _browser_worker.is_alive():
+            _browser_queue = _queue.Queue()
+            t = _threading.Thread(target=_browser_worker_main,
+                                  args=(_browser_queue,),
+                                  daemon=True, name="browser-worker")
+            t.start()
+            _browser_worker = t
+    reply = _queue.Queue()
+    _browser_queue.put({"fn": fn, "args": args, "kwargs": kwargs, "reply": reply})
+    try:
+        ok, val = reply.get(timeout=180)
+    except _queue.Empty:
+        raise RuntimeError("browser job timed out after 180s")
+    if ok:
+        return val
+    if _browser_dead(val):
+        with _browser_lock:
+            _browser_worker = None  # force relaunch on next call
+    raise val
+
+
+def _nav_impl(state, url, timeout):
+    page = state["page"]
+    page.goto(url, timeout=timeout * 1000, wait_until="domcontentloaded")
+    return {"url": page.url, "title": page.title()[:200]}
+
+
+def _shot_impl(state, full_page, high_quality):
+    page = state["page"]
+    if high_quality:
+        buf = page.screenshot(full_page=True)
+    else:
+        buf = page.screenshot(full_page=full_page)
+    return {"url": page.url, "high_quality": high_quality,
+            "data_uri": "data:image/png;base64," + base64.b64encode(buf).decode()}
+
+
+def _elshot_impl(state, selector, timeout):
+    page = state["page"]
+    el = page.locator(selector).first
+    el.wait_for(state="visible", timeout=timeout * 1000)
+    buf = el.screenshot()
+    return {"url": page.url, "selector": selector,
+            "data_uri": "data:image/png;base64," + base64.b64encode(buf).decode()}
+
+
+def _see_impl(state):
+    page = state["page"]
+    buf = page.screenshot()
+    text = page.inner_text("body")[:6000]
+    interactive = []
+    try:
+        for el in page.locator("a, button, input, select, textarea, [role=button]").all()[:60]:
+            try:
+                role = el.evaluate("e => e.tagName.toLowerCase()")
+                name = (el.inner_text() or el.get_attribute("aria-label")
+                        or el.get_attribute("placeholder") or el.get_attribute("name") or "")[:60]
+                if name.strip():
+                    interactive.append(f"{role}: {name.strip()}")
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return {
+        "url": page.url, "title": page.title()[:200],
+        "screenshot": "data:image/png;base64," + base64.b64encode(buf).decode(),
+        "text": text,
+        "interactive": interactive[:60],
+    }
+
+
+def _text_impl(state):
+    page = state["page"]
+    return {"url": page.url, "text": page.inner_text("body")[:8000]}
+
+
+def _current_url_impl(state):
+    return {"url": state["page"].url}
+
+
+def _frame_impl(state, quality):
+    page = state["page"]
+    return page.screenshot(type="jpeg", quality=quality)
+
+
+def _shutdown_impl(state):
+    try:
+        state["browser"].close()
+    except Exception:
+        pass
+    try:
+        state["pw"].stop()
+    except Exception:
+        pass
+    raise _WorkerExit()
+
+
+def browser_current_url() -> str:
+    """Current page URL (for /api/browser/current). Empty string if none."""
+    try:
+        return _browser_call(_current_url_impl).get("url", "")
+    except Exception:
+        return ""
 
 
 def _ensure_browser_binary():
@@ -225,9 +417,7 @@ def _get_browser():
 def tool_browser_navigate(url: str, timeout: int = 15) -> dict:
     """Open a URL. 15s cap — never hangs."""
     try:
-        _, _, page = _get_browser()
-        page.goto(url, timeout=timeout * 1000, wait_until="domcontentloaded")
-        return _ok(url=page.url, title=page.title()[:200])
+        return _ok(**_browser_call(_nav_impl, url, timeout=timeout))
     except Exception as e:
         return _err(e)
 
@@ -239,13 +429,8 @@ def tool_browser_screenshot(full_page: bool = False, high_quality: bool = False)
     high_quality=True: full-page PNG at device scale — for detailed inspection.
     """
     try:
-        _, _, page = _get_browser()
-        if high_quality:
-            buf = page.screenshot(full_page=True)
-        else:
-            buf = page.screenshot(full_page=full_page)
-        return _ok(url=page.url, high_quality=high_quality,
-                   data_uri="data:image/png;base64," + base64.b64encode(buf).decode())
+        return _ok(**_browser_call(_shot_impl, full_page=full_page,
+                                   high_quality=high_quality))
     except Exception as e:
         return _err(e)
 
@@ -253,12 +438,7 @@ def tool_browser_screenshot(full_page: bool = False, high_quality: bool = False)
 def tool_browser_element_screenshot(selector: str, timeout: int = 10) -> dict:
     """Screenshot a single element (CSS selector) as data URI. God-mode precision."""
     try:
-        _, _, page = _get_browser()
-        el = page.locator(selector).first
-        el.wait_for(state="visible", timeout=timeout * 1000)
-        buf = el.screenshot()
-        return _ok(url=page.url, selector=selector,
-                   data_uri="data:image/png;base64," + base64.b64encode(buf).decode())
+        return _ok(**_browser_call(_elshot_impl, selector, timeout=timeout))
     except Exception as e:
         return _err(e)
 
@@ -273,48 +453,32 @@ def tool_browser_see() -> dict:
     Use this when you need to UNDERSTAND a page visually, not just read HTML.
     """
     try:
-        _, _, page = _get_browser()
-        buf = page.screenshot()
-        text = page.inner_text("body")[:6000]
-        interactive = []
-        try:
-            for el in page.locator("a, button, input, select, textarea, [role=button]").all()[:60]:
-                try:
-                    role = el.evaluate("e => e.tagName.toLowerCase()")
-                    name = (el.inner_text() or el.get_attribute("aria-label")
-                            or el.get_attribute("placeholder") or el.get_attribute("name") or "")[:60]
-                    if name.strip():
-                        interactive.append(f"{role}: {name.strip()}")
-                except Exception:
-                    continue
-        except Exception:
-            pass
-        return _ok(
-            url=page.url, title=page.title()[:200],
-            screenshot="data:image/png;base64," + base64.b64encode(buf).decode(),
-            text=text,
-            interactive=interactive[:60],
-        )
+        return _ok(**_browser_call(_see_impl))
     except Exception as e:
         return _err(e)
 
 
 def tool_browser_text() -> dict:
     try:
-        _, _, page = _get_browser()
-        return _ok(url=page.url, text=page.inner_text("body")[:8000])
+        return _ok(**_browser_call(_text_impl))
     except Exception as e:
         return _err(e)
 
 
 def tool_browser_close() -> dict:
-    global _browser
+    global _browser_worker, _browser_queue
     try:
-        if _browser:
-            pw, b, _ = _browser
-            b.close()
-            pw.stop()
-            _browser = None
+        with _browser_lock:
+            if _browser_worker is not None and _browser_worker.is_alive():
+                reply = _queue.Queue()
+                _browser_queue.put({"fn": _shutdown_impl, "args": (),
+                                    "kwargs": {}, "reply": reply})
+                try:
+                    reply.get(timeout=30)
+                except _queue.Empty:
+                    pass
+            _browser_worker = None
+            _browser_queue = None
         return _ok(closed=True)
     except Exception as e:
         return _err(e)
@@ -339,8 +503,7 @@ def browser_frame_jpeg(min_interval: float = 0.2) -> bytes:
     if now - _last_frame_ts < min_interval:
         return _last_frame_bytes
     try:
-        _, _, page = _get_browser()
-        buf = page.screenshot(type="jpeg", quality=60)
+        buf = _browser_call(_frame_impl, 60)
         _last_frame_ts = now
         _last_frame_bytes = buf
         return buf
