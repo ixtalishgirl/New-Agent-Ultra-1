@@ -1627,6 +1627,16 @@ REGISTRY["safe_mode"] = (
     {"enabled": "bool, default true"},
 )
 
+# TLS/HTTP ARMORY + parse/extract + session/identity + proxy pool (agent/armory.py).
+# Merged here so execute_tool, /api/tools and the model see one registry.
+try:
+    from agent.armory import ARMORY_REGISTRY as _ARMORY
+    for _k, _v in _ARMORY.items():
+        if _k not in REGISTRY:
+            REGISTRY[_k] = _v
+except Exception as _e:
+    print(f"[armory] registry merge skipped: {_e}", flush=True)
+
 
 def describe_tools() -> str:
     lines = []

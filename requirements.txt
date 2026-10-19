@@ -5,3 +5,20 @@ firebase-admin>=6.0.0   # Firestore: agent memory/data store over HTTPS
 # Optional (install only if needed for full powers):
 # requests        # used only if stdlib urllib is insufficient
 curl-cffi>=0.7.0     # browser-TLS impersonation (web_search vs bot walls)
+# ---- TLS/HTTP ARMORY (Phase: armory) ----
+httpx>=0.27.0            # HTTP/2 client
+h2>=4.1.0                # HTTP/2 raw frame control
+aiohttp>=3.9.0           # async bulk fetching
+primp>=0.8.0             # fast Rust HTTP client w/ impersonation
+cloudscraper>=1.2.71     # Cloudflare fallback
+stem>=1.8.2              # Tor control port (phone-Tor future)
+# ---- PARSE / EXTRACT ----
+lxml>=5.0.0              # fast HTML/XML parsing
+beautifulsoup4>=4.12.0   # soup parsing
+parsel>=1.9.0            # CSS/XPath selectors
+selectolax>=0.3.20       # fastest HTML parser
+trafilatura>=1.8.0       # article text extraction
+extruct>=0.17.0          # JSON-LD/microdata metadata
+jmespath>=1.0.1          # JSON queries
+duckdb>=0.10.0           # SQL over scraped data
+openpyxl>=3.1.2          # Excel read/write
