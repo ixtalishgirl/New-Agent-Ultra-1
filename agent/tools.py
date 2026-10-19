@@ -208,31 +208,44 @@ def _browser_worker_main(q):
             job = q.get()
             job["reply"].put((False, RuntimeError(f"browser launch failed: {last_err}")))
         return
-    # Session persistence (Phase D): reload saved cookies/storage if a previous
-    # session was stored. Lets a user-completed login survive browser restarts
-    # within a deploy. File holds cookies only — never passwords or tokens.
-    _STATE_PATH = "/tmp/agent_browser_state.json"
-    _ctx_kwargs = {"viewport": {"width": 800, "height": 600}}
-    if os.path.exists(_STATE_PATH):
-        try:
-            _ctx_kwargs["storage_state"] = _STATE_PATH
-        except Exception:
-            pass
-    ctx = browser.new_context(**_ctx_kwargs)
-    page = ctx.new_page()
+    # Session persistence (Phase D) + per-mode isolation (Phase 3A):
+    # each network mode gets its own browser context with separate cookies,
+    # storage and proxy settings. State files are per-mode; they hold cookies
+    # only — never passwords or tokens.
+    def _state_path(mode):
+        return f"/tmp/agent_browser_state_{mode}.json"
 
-    # Block heavy resources by default — pages load 3-5x faster.
-    def _route(route):
-        if route.request.resource_type in ("image", "font", "media"):
-            route.abort()
-        else:
-            route.continue_()
-    page.route("**/*", _route)
-    page.set_default_timeout(15000)
-    page.set_default_navigation_timeout(15000)
+    def _new_session(mode):
+        from agent.browser_settings import NETWORK_MODES
+        info = NETWORK_MODES[mode]
+        kwargs = {"viewport": {"width": 800, "height": 600}}
+        if "env" in info:
+            proxy_url = os.environ.get(info["env"], "")
+            if proxy_url:
+                kwargs["proxy"] = {"server": proxy_url}
+        sp = _state_path(mode)
+        if os.path.exists(sp):
+            try:
+                kwargs["storage_state"] = sp
+            except Exception:
+                pass
+        ctx = browser.new_context(**kwargs)
+        page = ctx.new_page()
 
-    state = {"pw": pw, "browser": browser, "context": ctx, "page": page,
-             "xvfb": xvfb}
+        # Block heavy resources by default — pages load 3-5x faster.
+        def _route(route):
+            if route.request.resource_type in ("image", "font", "media"):
+                route.abort()
+            else:
+                route.continue_()
+        page.route("**/*", _route)
+        page.set_default_timeout(15000)
+        page.set_default_navigation_timeout(15000)
+        return {"context": ctx, "page": page, "mode": mode}
+
+    state = {"pw": pw, "browser": browser, "sessions": {},
+             "xvfb": xvfb, "_new_session": _new_session,
+             "_state_path": _state_path}
     while True:
         job = q.get()
         try:
@@ -283,13 +296,43 @@ def _browser_idle_sweep():
               file=sys.stderr, flush=True)
 
 
+def _use_mode_impl(state, mode):
+    """Ensure the active network mode's isolated session exists and select it.
+
+    Each mode gets its own browser context: separate cookies, storage, proxy.
+    Never mixes sessions across modes.
+    """
+    sessions = state["sessions"]
+    if mode not in sessions:
+        sessions[mode] = state["_new_session"](mode)
+    sess = sessions[mode]
+    state["page"] = sess["page"]
+    state["context"] = sess["context"]
+    return {"mode": mode}
+
+
 def _browser_call(fn, *args, **kwargs):
     """Run fn(state, *args, **kwargs) in the browser worker thread.
 
     Starts the worker on first use. If the browser died, resets so the
-    next call relaunches it.
+    next call relaunches it. Resolves the active network mode first:
+    blocked/unconfigured modes raise a clear error — never silently fall
+    back to another network.
     """
     global _browser_queue, _browser_worker, _browser_last_used
+    # Resolve + validate the network mode OUTSIDE the worker (no browser needed).
+    try:
+        from agent.browser_settings import get_network_mode, network_status
+        mode = get_network_mode()
+        st = network_status()["modes"][mode]
+        if not st["available"]:
+            raise RuntimeError(
+                f"browser network mode '{mode}' ({st['name']}) is unavailable: "
+                f"{st['reason']}. Select another mode in browser settings.")
+    except RuntimeError:
+        raise
+    except Exception:
+        mode = "normal"  # settings module missing? fail open to normal
     with _browser_lock:
         _browser_idle_sweep()  # close if idle too long; relaunch below
         if _browser_worker is None or not _browser_worker.is_alive():
@@ -301,8 +344,14 @@ def _browser_call(fn, *args, **kwargs):
             _browser_worker = t
         q = _browser_queue  # captured under lock; close() may replace it after
         _browser_last_used = time.monotonic()
+
+    def _run_with_mode(state, *a, **k):
+        _use_mode_impl(state, mode)
+        return fn(state, *a, **k)
+    _run_with_mode.__name__ = getattr(fn, "__name__", "browser_job")
+
     reply = _queue.Queue()
-    q.put({"fn": fn, "args": args, "kwargs": kwargs, "reply": reply})
+    q.put({"fn": _run_with_mode, "args": args, "kwargs": kwargs, "reply": reply})
     _t0 = time.monotonic()
     try:
         ok, val = reply.get(timeout=180)
@@ -335,7 +384,13 @@ def _nav_impl(state, url, timeout):
             # login is captured even if the browser later crashes.
             try:
                 if "google.com" in page.url or "gmail.com" in page.url:
-                    state["context"].storage_state(path="/tmp/agent_browser_state.json")
+                    sess_mode = "normal"
+                    for m, s in state.get("sessions", {}).items():
+                        if s.get("page") is page:
+                            sess_mode = m
+                            break
+                    state["context"].storage_state(
+                        path=state["_state_path"](sess_mode))
             except Exception:
                 pass
             return {"url": page.url, "title": page.title()[:200]}
@@ -518,9 +573,13 @@ def _switch_tab_impl(state, index):
 
 
 def _shutdown_impl(state):
-    # Persist session cookies before shutdown so a login survives restarts.
+    # Persist each mode's session cookies before shutdown.
     try:
-        state["context"].storage_state(path="/tmp/agent_browser_state.json")
+        for mode, sess in state.get("sessions", {}).items():
+            try:
+                sess["context"].storage_state(path=state["_state_path"](mode))
+            except Exception:
+                pass
     except Exception:
         pass
     try:
@@ -578,6 +637,22 @@ def tool_browser_navigate(url: str, timeout: int = 15) -> dict:
     """Open a URL. 15s cap — never hangs."""
     try:
         return _ok(**_browser_call(_nav_impl, url, timeout=timeout))
+    except Exception as e:
+        return _err(e)
+
+
+def _search_impl(state, query, engine_id, timeout):
+    from agent.browser_settings import search_url
+    url = search_url(query, engine_id or "")
+    return _nav_impl(state, url, timeout)
+
+
+def tool_browser_search(query: str, engine: str = "", timeout: int = 15) -> dict:
+    """Search the web using the configured default search engine
+    (or the named engine). Uses the search-engine setting — switchable
+    without redeploy. Returns the results page URL and title."""
+    try:
+        return _ok(**_browser_call(_search_impl, query, engine, timeout))
     except Exception as e:
         return _err(e)
 
@@ -1431,6 +1506,8 @@ REGISTRY = {
                     {"path": "str (required)", "confirm": "bool (required)"}),
     "browser_navigate": (tool_browser_navigate, "Open a URL in the agent browser (15s cap).",
                          {"url": "str (required)", "timeout": "int seconds, default 15"}),
+    "browser_search": (tool_browser_search, "Search the web with the configured default search engine (Google/DuckDuckGo/Startpage/Bing — switchable in browser settings, no redeploy).",
+                       {"query": "str (required)", "engine": "str, optional engine id", "timeout": "int seconds, default 15"}),
     "browser_screenshot": (tool_browser_screenshot, "Screenshot the page as data URI. Fast 800x600 by default; high_quality=true for full-page detailed PNG.",
                            {"full_page": "bool, default false", "high_quality": "bool, default false"}),
     "browser_element_screenshot": (tool_browser_element_screenshot, "Screenshot ONE element by CSS selector as data URI.",

@@ -285,6 +285,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"url": tools.browser_current_url()})
         if path == "/api/browser/stream":
             return self._mjpeg()
+        if path == "/api/browser/settings":
+            from agent import browser_settings as bs
+            return self._json({
+                "engines": bs.list_engines(),
+                "default_engine": bs.get_default_engine(),
+                "network": bs.network_status(),
+            })
         if path == "/api/permissions":
             return self._json(permissions_payload())
         if path == "/api/tunnel/status":
@@ -318,6 +325,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._perm_toggle()
         if parsed.path == "/api/upload":
             return self._upload()
+        if parsed.path == "/api/browser/settings":
+            return self._browser_settings()
         if parsed.path not in ("/api/chat", "/api/chat/stream"):
             return self._json({"error": "not found"}, 404)
         try:
@@ -354,6 +363,41 @@ class Handler(BaseHTTPRequestHandler):
         res = tools.execute_tool(name, args if isinstance(args, dict) else {})
         ok = bool(isinstance(res, dict) and res.get("ok"))
         return self._json({"success": ok, "result": res})
+
+    def _browser_settings(self):
+        """POST /api/browser/settings — change search engine / network mode.
+
+        Body: {"action": "set_engine", "engine": "<id>"}
+              {"action": "add_engine", "id": "...", "name": "...", "template": "..."}
+              {"action": "remove_engine", "id": "..."}
+              {"action": "set_network", "mode": "normal|germany|virginia|tor"}
+        No redeploy needed; persisted to disk.
+        """
+        from agent import browser_settings as bs
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            payload = json.loads(self.rfile.read(length) or b"{}")
+        except Exception:
+            return self._json({"ok": False, "error": "bad JSON"}, 400)
+        action = (payload.get("action") or "").strip()
+        try:
+            if action == "set_engine":
+                result = bs.set_default_engine(payload.get("engine", ""))
+                return self._json({"ok": True, "default_engine": result})
+            if action == "add_engine":
+                result = bs.add_search_engine(payload.get("id", ""),
+                                              payload.get("name", ""),
+                                              payload.get("template", ""))
+                return self._json({"ok": True, "engine": result})
+            if action == "remove_engine":
+                bs.remove_search_engine(payload.get("id", ""))
+                return self._json({"ok": True})
+            if action == "set_network":
+                result = bs.set_network_mode(payload.get("mode", ""))
+                return self._json({"ok": True, "network": result})
+            return self._json({"ok": False, "error": "unknown action"}, 400)
+        except ValueError as e:
+            return self._json({"ok": False, "error": str(e)}, 400)
 
     def _perm_toggle(self):
         """POST /api/permissions/toggle {name, enabled} — operator override.
