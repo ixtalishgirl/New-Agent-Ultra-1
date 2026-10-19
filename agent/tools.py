@@ -223,6 +223,16 @@ def _browser_worker_main(q):
             proxy_url = os.environ.get(info["env"], "")
             if proxy_url:
                 kwargs["proxy"] = {"server": proxy_url}
+        if info.get("pool"):
+            # Residential mode: rotating free proxy from the armory pool.
+            # Pool empty = clear error, NEVER silent direct fallback.
+            from agent.armory import tool_proxy_pool_get
+            pr = tool_proxy_pool_get()
+            if not pr.get("ok"):
+                raise RuntimeError(
+                    "residential pool empty — free proxy sources unreachable; "
+                    "not falling back to direct")
+            kwargs["proxy"] = {"server": pr["proxy"]}
         sp = _state_path(mode)
         if os.path.exists(sp):
             try:
@@ -653,6 +663,88 @@ def tool_browser_search(query: str, engine: str = "", timeout: int = 15) -> dict
     without redeploy. Returns the results page URL and title."""
     try:
         return _ok(**_browser_call(_search_impl, query, engine, timeout))
+    except Exception as e:
+        return _err(e)
+
+
+def _extract_impl(state, url, kind, timeout):
+    """Navigate, then extract structured data IN the browser (armory inside)."""
+    from agent import armory as _am
+    nav = _nav_impl(state, url, timeout)
+    html = state["page"].evaluate("() => document.documentElement.outerHTML")
+    if kind == "article":
+        r = _am.tool_extract_article(html, is_url=False)
+    elif kind == "tables":
+        r = _am.tool_html_tables(html)
+    elif kind == "metadata":
+        r = _am.tool_extract_metadata(html)
+    elif kind == "text":
+        r = {"ok": True, "text": state["page"].evaluate(
+            "() => document.body.innerText").strip()[:50_000]}
+    else:
+        return _err(f"unknown kind '{kind}' (article|tables|metadata|text)")
+    r["url"] = nav.get("url", url)
+    r["title"] = nav.get("title", "")
+    return r
+
+
+def tool_browser_extract(url: str, kind: str = "article", timeout: int = 20) -> dict:
+    """BROWSER + ARMORY in one call: open the URL in the real browser, then
+    extract structured data — kind: article (main text), tables (all HTML
+    tables), metadata (JSON-LD/OpenGraph), text (visible text)."""
+    try:
+        return _ok(**_browser_call(_extract_impl, url, kind, timeout))
+    except Exception as e:
+        return _err(e)
+
+
+def _fetch_fallback_impl(state, url, timeout):
+    """Try the real browser first; on block/challenge, fall back through the
+    armory chain (impersonated fetch -> cloudscraper). Reports every hop."""
+    from agent import armory as _am
+    hops = []
+    # Hop 1: real browser render.
+    try:
+        nav = _nav_impl(state, url, timeout)
+        # Quick challenge sniff: Cloudflare / captcha markers in title/html.
+        marker = state["page"].evaluate(
+            "() => (document.title + ' ' + document.body.innerText)"
+            ".slice(0, 2000)")
+        low = marker.lower()
+        blocked = any(k in low for k in (
+            "just a moment", "verifying you are human", "captcha",
+            "attention required", "access denied"))
+        hops.append({"hop": "browser", "ok": not blocked,
+                     "url": nav.get("url", url),
+                     "note": "challenge detected" if blocked else "rendered"})
+        if not blocked:
+            return {"chain": hops, "url": nav.get("url", url),
+                    "title": nav.get("title", ""),
+                    "text": state["page"].evaluate(
+                        "() => document.body.innerText").strip()[:50_000]}
+    except Exception as e:
+        hops.append({"hop": "browser", "ok": False, "error": str(e)[:200]})
+    # Hop 2: impersonated TLS fetch.
+    r = _am.tool_http_impersonate(url, timeout=timeout)
+    hops.append({"hop": "impersonate", "ok": bool(r.get("ok")),
+                 "status": r.get("status", r.get("error", ""))})
+    if r.get("ok"):
+        r["chain"] = hops
+        return r
+    # Hop 3: cloudscraper.
+    r = _am.tool_cloudscraper_fetch(url, timeout=timeout)
+    hops.append({"hop": "cloudscraper", "ok": bool(r.get("ok")),
+                 "status": r.get("status", r.get("error", ""))})
+    r["chain"] = hops
+    return r
+
+
+def tool_browser_fetch_fallback(url: str, timeout: int = 20) -> dict:
+    """Fetch a page with automatic fallback INSIDE the browser workflow:
+    real browser render -> TLS-impersonated fetch -> cloudscraper.
+    Never silently fails — every hop is reported in 'chain'."""
+    try:
+        return _ok(**_browser_call(_fetch_fallback_impl, url, timeout))
     except Exception as e:
         return _err(e)
 
@@ -1508,6 +1600,10 @@ REGISTRY = {
                          {"url": "str (required)", "timeout": "int seconds, default 15"}),
     "browser_search": (tool_browser_search, "Search the web with the configured default search engine (Google/DuckDuckGo/Startpage/Bing — switchable in browser settings, no redeploy).",
                        {"query": "str (required)", "engine": "str, optional engine id", "timeout": "int seconds, default 15"}),
+    "browser_extract": (tool_browser_extract, "BROWSER+ARMORY: open URL in the real browser then extract structured data — kind: article|tables|metadata|text.",
+                       {"url": "str (required)", "kind": "str, default article", "timeout": "int seconds, default 20"}),
+    "browser_fetch_fallback": (tool_browser_fetch_fallback, "Fetch with automatic fallback INSIDE the browser workflow: real render -> TLS-impersonated fetch -> cloudscraper. Every hop reported in 'chain'.",
+                       {"url": "str (required)", "timeout": "int seconds, default 20"}),
     "browser_screenshot": (tool_browser_screenshot, "Screenshot the page as data URI. Fast 800x600 by default; high_quality=true for full-page detailed PNG.",
                            {"full_page": "bool, default false", "high_quality": "bool, default false"}),
     "browser_element_screenshot": (tool_browser_element_screenshot, "Screenshot ONE element by CSS selector as data URI.",

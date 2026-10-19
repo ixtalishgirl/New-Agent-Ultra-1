@@ -53,6 +53,9 @@ NETWORK_MODES = {
             "blocked_reason": ("Tor is prohibited by the hosting provider's Acceptable Use "
                                "Policy (proxies/anonymization services). A Tor module cannot "
                                "be deployed here without risking the whole project.")},
+    "residential": {"name": "Residential pool",
+                    "description": "Free rotating proxy pool (ProxyScrape/Geonode). Best effort.",
+                    "pool": True},
 }
 
 _DEFAULTS = {"default_engine": "duckduckgo", "custom_engines": {}, "network_mode": "normal"}
