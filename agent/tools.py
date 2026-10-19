@@ -208,7 +208,17 @@ def _browser_worker_main(q):
             job = q.get()
             job["reply"].put((False, RuntimeError(f"browser launch failed: {last_err}")))
         return
-    ctx = browser.new_context(viewport={"width": 800, "height": 600})
+    # Session persistence (Phase D): reload saved cookies/storage if a previous
+    # session was stored. Lets a user-completed login survive browser restarts
+    # within a deploy. File holds cookies only — never passwords or tokens.
+    _STATE_PATH = "/tmp/agent_browser_state.json"
+    _ctx_kwargs = {"viewport": {"width": 800, "height": 600}}
+    if os.path.exists(_STATE_PATH):
+        try:
+            _ctx_kwargs["storage_state"] = _STATE_PATH
+        except Exception:
+            pass
+    ctx = browser.new_context(**_ctx_kwargs)
     page = ctx.new_page()
 
     # Block heavy resources by default — pages load 3-5x faster.
@@ -244,14 +254,43 @@ def _browser_dead(err: Exception) -> bool:
     ))
 
 
+# Idle-session cleanup (Phase H): close the browser if unused for 30 minutes
+# to free Railway memory. Next tool call relaunches transparently.
+_BROWSER_IDLE_TIMEOUT_S = 30 * 60
+_browser_last_used = 0.0
+
+
+def _browser_idle_sweep():
+    """Close idle browser worker. Called under _browser_lock from _browser_call."""
+    global _browser_worker, _browser_queue, _browser_last_used
+    if (_browser_worker is not None and _browser_worker.is_alive()
+            and _browser_last_used
+            and time.monotonic() - _browser_last_used > _BROWSER_IDLE_TIMEOUT_S):
+        try:
+            reply = _queue.Queue()
+            _browser_queue.put({"fn": _shutdown_impl, "args": (),
+                                "kwargs": {}, "reply": reply})
+            try:
+                reply.get(timeout=15)
+            except _queue.Empty:
+                pass
+        except Exception:
+            pass
+        _browser_worker = None
+        _browser_queue = None
+        print("[browser] idle timeout — browser closed to free memory",
+              file=sys.stderr, flush=True)
+
+
 def _browser_call(fn, *args, **kwargs):
     """Run fn(state, *args, **kwargs) in the browser worker thread.
 
     Starts the worker on first use. If the browser died, resets so the
     next call relaunches it.
     """
-    global _browser_queue, _browser_worker
+    global _browser_queue, _browser_worker, _browser_last_used
     with _browser_lock:
+        _browser_idle_sweep()  # close if idle too long; relaunch below
         if _browser_worker is None or not _browser_worker.is_alive():
             _browser_queue = _queue.Queue()
             t = _threading.Thread(target=_browser_worker_main,
@@ -260,6 +299,7 @@ def _browser_call(fn, *args, **kwargs):
             t.start()
             _browser_worker = t
         q = _browser_queue  # captured under lock; close() may replace it after
+        _browser_last_used = time.monotonic()
     reply = _queue.Queue()
     q.put({"fn": fn, "args": args, "kwargs": kwargs, "reply": reply})
     _t0 = time.monotonic()
@@ -290,6 +330,13 @@ def _nav_impl(state, url, timeout):
     for attempt in range(2):
         try:
             page.goto(url, timeout=timeout * 1000, wait_until="domcontentloaded")
+            # Persist session after Google-domain navigations so a completed
+            # login is captured even if the browser later crashes.
+            try:
+                if "google.com" in page.url or "gmail.com" in page.url:
+                    state["context"].storage_state(path="/tmp/agent_browser_state.json")
+            except Exception:
+                pass
             return {"url": page.url, "title": page.title()[:200]}
         except Exception as e:
             last_err = e
@@ -338,11 +385,36 @@ def _see_impl(state):
         }""")
     except Exception:
         interactive = []
+    # Challenge detection (Phase G): identify human-verification pages so the
+    # agent can pause and ask the user instead of blindly retrying.
+    # Never attempts to bypass — detection only.
+    challenge = None
+    try:
+        challenge = page.evaluate("""() => {
+            const html = document.documentElement.outerHTML.toLowerCase();
+            const title = document.title.toLowerCase();
+            const checks = [
+                ["cloudflare", html.includes("verifying you are human") ||
+                    html.includes("cf-challenge") || html.includes("cloudflare") &&
+                    (html.includes("checkbox") || title.includes("just a moment"))],
+                ["recaptcha", !!document.querySelector("iframe[src*='recaptcha']") ||
+                    html.includes("g-recaptcha")],
+                ["hcaptcha", !!document.querySelector("iframe[src*='hcaptcha']") ||
+                    html.includes("h-captcha")],
+                ["perimeterx", html.includes("perimeterx") || html.includes("px-captcha")],
+                ["turnstile", !!document.querySelector("iframe[src*='challenges.cloudflare']")],
+            ];
+            for (const [type, hit] of checks) if (hit) return {type};
+            return null;
+        }""")
+    except Exception:
+        pass
     return {
         "url": page.url, "title": page.title()[:200],
         "screenshot": "data:image/png;base64," + base64.b64encode(buf).decode(),
         "text": text,
         "interactive": interactive[:60],
+        "challenge": challenge,  # null or {"type": "cloudflare"|"recaptcha"|...}
     }
 
 
@@ -445,6 +517,11 @@ def _switch_tab_impl(state, index):
 
 
 def _shutdown_impl(state):
+    # Persist session cookies before shutdown so a login survives restarts.
+    try:
+        state["context"].storage_state(path="/tmp/agent_browser_state.json")
+    except Exception:
+        pass
     try:
         state["browser"].close()
     except Exception:
@@ -1346,7 +1423,7 @@ REGISTRY = {
                            {"full_page": "bool, default false", "high_quality": "bool, default false"}),
     "browser_element_screenshot": (tool_browser_element_screenshot, "Screenshot ONE element by CSS selector as data URI.",
                            {"selector": "str (required, CSS)", "timeout": "int seconds, default 10"}),
-    "browser_see": (tool_browser_see, "GOD-MODE EYES: screenshot + visible text + interactive elements, all at once. Use to UNDERSTAND a page visually.", {}),
+    "browser_see": (tool_browser_see, "GOD-MODE EYES: screenshot + visible text + interactive elements, all at once. Use to UNDERSTAND a page visually. Also returns 'challenge' field (null or {type}) when a human-verification page is detected — pause and ask the user instead of retrying.", {}),
     "browser_text": (tool_browser_text, "Get the visible text of the current page.", {}),
     "browser_click": (tool_browser_click, "Click an element by CSS selector. Waits for visibility first.",
                       {"selector": "str (required, CSS)", "timeout": "int seconds, default 10"}),
