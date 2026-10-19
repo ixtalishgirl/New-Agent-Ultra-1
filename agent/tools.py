@@ -179,7 +179,7 @@ def _browser_worker_main(q):
         "--disable-extensions", "--disable-background-networking",
         "--disable-sync", "--mute-audio",
     ]
-    for kwargs in ({"channel": "chromium-headless-shell"}, {}):
+    for kwargs in ({"channel": "chrome"}, {"channel": "chromium"}, {}):
         try:
             browser = pw.chromium.launch(headless=True, args=launch_args, **kwargs)
             break
