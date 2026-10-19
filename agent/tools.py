@@ -318,6 +318,23 @@ def _text_impl(state):
     return {"url": page.url, "text": page.inner_text("body")[:8000]}
 
 
+def _click_impl(state, selector, timeout):
+    page = state["page"]
+    el = page.locator(selector).first
+    el.wait_for(state="visible", timeout=timeout * 1000)
+    el.click(timeout=timeout * 1000)
+    page.wait_for_timeout(1500)
+    return {"url": page.url, "title": page.title()[:200], "clicked": selector}
+
+
+def _fill_impl(state, selector, text, timeout):
+    page = state["page"]
+    el = page.locator(selector).first
+    el.wait_for(state="visible", timeout=timeout * 1000)
+    el.fill(text, timeout=timeout * 1000)
+    return {"url": page.url, "filled": selector}
+
+
 def _current_url_impl(state):
     return {"url": state["page"].url}
 
@@ -415,6 +432,22 @@ def tool_browser_see() -> dict:
 def tool_browser_text() -> dict:
     try:
         return _ok(**_browser_call(_text_impl))
+    except Exception as e:
+        return _err(e)
+
+
+def tool_browser_click(selector: str, timeout: int = 10) -> dict:
+    """Click an element (CSS selector). Waits for it to be visible first."""
+    try:
+        return _ok(**_browser_call(_click_impl, selector, timeout))
+    except Exception as e:
+        return _err(e)
+
+
+def tool_browser_fill(selector: str, text: str, timeout: int = 10) -> dict:
+    """Fill a form field (CSS selector) with text. Waits for it to be visible first."""
+    try:
+        return _ok(**_browser_call(_fill_impl, selector, text, timeout))
     except Exception as e:
         return _err(e)
 
@@ -1167,6 +1200,10 @@ REGISTRY = {
                            {"selector": "str (required, CSS)", "timeout": "int seconds, default 10"}),
     "browser_see": (tool_browser_see, "GOD-MODE EYES: screenshot + visible text + interactive elements, all at once. Use to UNDERSTAND a page visually.", {}),
     "browser_text": (tool_browser_text, "Get the visible text of the current page.", {}),
+    "browser_click": (tool_browser_click, "Click an element by CSS selector. Waits for visibility first.",
+                      {"selector": "str (required, CSS)", "timeout": "int seconds, default 10"}),
+    "browser_fill": (tool_browser_fill, "Fill a form field by CSS selector with text. Waits for visibility first.",
+                     {"selector": "str (required, CSS)", "text": "str (required)", "timeout": "int seconds, default 10"}),
     "browser_close": (tool_browser_close, "Close the browser.", {}),
     "web_search": (tool_web_search, "Web search (DuckDuckGo, no key). Returns titles/URLs/snippets.",
                   {"query": "str (required)", "max_results": "int, default 8"}),
