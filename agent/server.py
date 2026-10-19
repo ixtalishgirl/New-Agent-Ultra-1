@@ -6,6 +6,11 @@ Endpoints:
   POST /api/chat              -> {"message": "..."} -> model + tools -> {"success","final_text",...}
   GET  /api/browser/stream    -> MJPEG live browser view (5 fps, 800x600)
   GET  /api/browser/current   -> {"url": ...} of the live browser page
+  GET  /api/permissions       -> 552 permissions + 5 locked denials (with operator overrides)
+  POST /api/permissions/toggle -> {"name","enabled"} operator override (5 locked can never flip)
+  GET  /api/tunnel/status     -> model tunnel (ngrok URL, reachability)
+  POST /api/tools/execute     -> {"name","args"} run one of the 46 tools (denials enforced)
+  POST /api/upload            -> multipart file upload, 25MB cap, into <workspace>/uploads
   POST /api/chat/stream       -> SSE stream: token/tool/round/done events (fast)
   GET  /                      -> dashboard UI (dashboard/dist) if present
 
@@ -21,6 +26,7 @@ import mimetypes
 import os
 import re
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -40,6 +46,49 @@ BARE_TOOL_CALL_START_RE = re.compile(r'\{\s*"name"\s*:\s*"([a-zA-Z0-9_]+)"')
 FINAL_RE = re.compile(r"<final_answer>(.*?)</final_answer>", re.DOTALL)
 
 DASHBOARD_DIR = Path(__file__).resolve().parent.parent / "dashboard" / "dist"
+
+# The 552 trained permissions + 5 locked denials, bundled with the server.
+# Format per line: "<name>: True|False". False entries are locked forever.
+PERM_FILE = Path(__file__).resolve().parent / "permissions_full.txt"
+
+
+def load_permissions() -> list:
+    perms = []
+    try:
+        for line in PERM_FILE.read_text().splitlines():
+            line = line.strip()
+            if not line or ":" not in line:
+                continue
+            name, _, val = line.rpartition(":")
+            name, val = name.strip(), val.strip().lower()
+            locked = val == "false"
+            perms.append({
+                "name": name,
+                "category": "denial" if locked else "capability",
+                "enabled": not locked,
+                "locked": locked,
+            })
+    except Exception:
+        pass
+    return perms
+
+
+PERMISSIONS = load_permissions()
+
+
+def permissions_payload() -> dict:
+    """Current permission list with operator overrides applied."""
+    out = []
+    for p in PERMISSIONS:
+        enabled = tools.PERMISSION_OVERRIDES.get(p["name"], p["enabled"])
+        out.append({**p, "enabled": enabled})
+    locked = sum(1 for p in out if p["locked"])
+    return {
+        "total": len(out),
+        "enabled": sum(1 for p in out if p["enabled"]),
+        "locked": locked,
+        "permissions": out,
+    }
 
 
 def parse_tool_calls(text: str) -> list:
@@ -86,6 +135,20 @@ def run_chat(message: str, on_event=None) -> dict:
     """
     t0 = time.time()
     system = brain.build_system_prompt()
+    # Operator permission overrides (dashboard Permissions tab) are the
+    # highest-priority instruction: the model's behavior is governed by
+    # its prompt, so a REVOKED entry here is the real enforcement.
+    if tools.PERMISSION_OVERRIDES:
+        lines = [
+            f"- {n}: {'GRANTED' if en else 'REVOKED'} by the operator"
+            for n, en in sorted(tools.PERMISSION_OVERRIDES.items())
+        ]
+        system += (
+            "\n\nOPERATOR PERMISSION OVERRIDES (highest priority, live session):\n"
+            + "\n".join(lines)
+            + "\nHonor these exactly: REVOKED means you must not perform, use, or "
+              "work around that capability in any way."
+        )
     tool_desc = tools.describe_tools()
     messages = [
         {"role": "system",
@@ -141,6 +204,25 @@ def run_chat(message: str, on_event=None) -> dict:
     return {"success": True, "final_text": final_text[:4000],
             "tool_calls": total_calls, "browser_used": browser_used,
             "duration_ms": int((time.time() - t0) * 1000)}
+
+
+def tunnel_status() -> dict:
+    """Model tunnel status for the dashboard Task Monitor."""
+    url = model_client.BASE_URL
+    reachable = False
+    if url:
+        try:
+            with urllib.request.urlopen(url + "/health", timeout=4) as r:
+                reachable = r.status == 200
+        except Exception:
+            reachable = False
+    return {
+        "tunnel": "ngrok",
+        "url": url or "(not configured)",
+        "model_configured": bool(url),
+        "reachable": reachable,
+        "note": "Kaggle 2xT4 llama-server behind ngrok; serves the finetuned Q8_0 GGUF.",
+    }
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -207,6 +289,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"url": ""})
         if path == "/api/browser/stream":
             return self._mjpeg()
+        if path == "/api/permissions":
+            return self._json(permissions_payload())
+        if path == "/api/tunnel/status":
+            return self._json(tunnel_status())
         return self._static(path)
 
     def _mjpeg(self):
@@ -230,6 +316,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
+        if parsed.path == "/api/tools/execute":
+            return self._exec_tool()
+        if parsed.path == "/api/permissions/toggle":
+            return self._perm_toggle()
+        if parsed.path == "/api/upload":
+            return self._upload()
         if parsed.path not in ("/api/chat", "/api/chat/stream"):
             return self._json({"error": "not found"}, 404)
         try:
@@ -247,6 +339,96 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             result = {"success": False, "error": str(e)[:500]}
         self._json(result)
+
+    def _exec_tool(self):
+        """POST /api/tools/execute {name, args} — run one of the 46 tools.
+
+        Used by the dashboard Tools tab, the live-browser panel, and the
+        Permissions/Config tabs. The 5 locked denials stay enforced here.
+        """
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            payload = json.loads(self.rfile.read(length) or b"{}")
+        except Exception:
+            return self._json({"success": False, "error": "bad JSON"}, 400)
+        name = (payload.get("name") or "").strip()
+        args = payload.get("args") or {}
+        if not name:
+            return self._json({"success": False, "error": "missing tool name"}, 400)
+        res = tools.execute_tool(name, args if isinstance(args, dict) else {})
+        ok = bool(isinstance(res, dict) and res.get("ok"))
+        return self._json({"success": ok, "result": res})
+
+    def _perm_toggle(self):
+        """POST /api/permissions/toggle {name, enabled} — operator override.
+
+        The 5 locked denials can never be flipped. Everything else records
+        an override that run_chat() injects into the system prompt at
+        highest priority (the real enforcement in this architecture).
+        """
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            payload = json.loads(self.rfile.read(length) or b"{}")
+        except Exception:
+            return self._json({"ok": False, "error": "bad JSON"}, 400)
+        name = (payload.get("name") or "").strip()
+        enabled = bool(payload.get("enabled"))
+        entry = next((p for p in PERMISSIONS if p["name"] == name), None)
+        if not entry:
+            return self._json({"ok": False, "error": "unknown permission"}, 400)
+        if entry["locked"]:
+            return self._json({"ok": False,
+                               "error": "locked: one of the 5 denials, can never change"}, 400)
+        tools.PERMISSION_OVERRIDES[name] = enabled
+        return self._json({"ok": True, "name": name, "enabled": enabled})
+
+    def _upload(self):
+        """POST /api/upload — multipart/form-data file upload (25MB cap).
+
+        Saves into <workspace>/uploads and returns {ok, filename, size, path}.
+        """
+        ctype = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in ctype:
+            return self._json({"ok": False, "error": "expected multipart/form-data"}, 400)
+        m = re.search(r"boundary=([^;]+)", ctype)
+        if not m:
+            return self._json({"ok": False, "error": "missing boundary"}, 400)
+        boundary = m.group(1).strip().strip('"')
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except Exception:
+            length = 0
+        if length <= 0 or length > 26 * 1024 * 1024:
+            return self._json({"ok": False, "error": "empty file or over the 25MB cap"}, 413)
+        try:
+            body = self.rfile.read(length)
+        except Exception:
+            return self._json({"ok": False, "error": "read failed"}, 400)
+        delim = b"--" + boundary.encode()
+        for part in body.split(delim):
+            if b'filename="' not in part:
+                continue
+            head, sep, content = part.partition(b"\r\n\r\n")
+            if not sep:
+                continue
+            fm = re.search(rb'filename="([^"]*)"', head)
+            if not fm:
+                continue
+            fname = os.path.basename(fm.group(1).decode("utf-8", "replace")).strip()
+            if not fname:
+                continue
+            if content.endswith(b"\r\n"):
+                content = content[:-2]
+            dest_dir = tools.WORKSPACE / "uploads"
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest = dest_dir / fname
+            try:
+                dest.write_bytes(content)
+            except Exception as e:
+                return self._json({"ok": False, "error": f"write failed: {e}"}, 500)
+            return self._json({"ok": True, "filename": fname,
+                               "size": len(content), "path": str(dest)})
+        return self._json({"ok": False, "error": "no file part found"}, 400)
 
     def _sse_chat(self, message: str):
         """Server-sent events: streams tokens live as the model generates.

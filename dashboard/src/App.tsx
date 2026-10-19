@@ -8,6 +8,7 @@ import Config from "./components/Config";
 import FileManager from "./components/FileManager";
 import Workflows from "./components/Workflows";
 import Permissions from "./components/Permissions";
+import LiveBrowser from "./components/LiveBrowser";
 import { ConnectionPill, useConnection, type ConnState } from "./components/Connection";
 import { getApprovals, subscribe } from "./store/history";
 import { applyTheme } from "./api/client";
@@ -15,6 +16,7 @@ import "./styles.css";
 
 type Tab =
   | "chat"
+  | "browser"
   | "tasks"
   | "tools"
   | "approvals"
@@ -26,6 +28,7 @@ type Tab =
 
 const TABS: Array<{ id: Tab; label: string; icon: string }> = [
   { id: "chat", label: "Chat", icon: "💬" },
+  { id: "browser", label: "Browser", icon: "🌐" },
   { id: "tasks", label: "Tasks", icon: "📊" },
   { id: "tools", label: "Tools", icon: "🧰" },
   { id: "files", label: "Files", icon: "📁" },
@@ -38,6 +41,7 @@ const TABS: Array<{ id: Tab; label: string; icon: string }> = [
 
 const TITLES: Record<Tab, string> = {
   chat: "Agent Chat",
+  browser: "Live Browser",
   tasks: "Task Monitor",
   tools: "Tool Registry",
   files: "File Manager",
@@ -132,6 +136,11 @@ export default function App() {
         </div>
         <div className="content" key={connKey}>
           {tab === "chat" && <Chat conn={state as ConnState} />}
+          {tab === "browser" && (
+            <div style={{ padding: 16, maxWidth: 960, margin: "0 auto" }}>
+              <LiveBrowser visible={true} onClose={() => setTab("chat")} />
+            </div>
+          )}
           {tab === "tasks" && <TaskMonitor conn={state as ConnState} />}
           {tab === "tools" && <ToolRegistry conn={state as ConnState} onApproval={() => setTab("approvals")} />}
           {tab === "files" && <FileManager conn={state as ConnState} />}

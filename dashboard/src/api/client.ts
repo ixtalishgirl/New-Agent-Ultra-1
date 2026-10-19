@@ -292,10 +292,16 @@ export const api = {
     const raw = await request<unknown>("/api/permissions");
     return normalizePermissions(raw);
   },
-  /** Flip one permission via the agent's own perm_grant / perm_revoke tools. */
+  /** Flip one permission via the operator-override endpoint.
+   *  The 5 locked denials can never be flipped (the server refuses).
+   *  Overrides are injected into the system prompt at highest priority. */
   async togglePermission(name: string, enable: boolean): Promise<string> {
-    const out = await this.executeTool(enable ? "perm_grant" : "perm_revoke", { name });
-    return typeof out === "string" ? out : JSON.stringify(out);
+    const out = await request<{ ok: boolean; error?: string }>("/api/permissions/toggle", {
+      method: "POST",
+      body: JSON.stringify({ name, enabled: enable }),
+    });
+    if (!out.ok) throw new ApiError("server", 500, out.error || "toggle failed");
+    return "ok";
   },
   /** Master safe-mode switch. enabled=true re-asserts safe defaults (475 ON, 5 locked). */
   async setSafeMode(enabled: boolean): Promise<string> {

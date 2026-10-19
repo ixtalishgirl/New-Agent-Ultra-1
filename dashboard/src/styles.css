@@ -483,3 +483,26 @@ button.btn {
   border-color: #6a6aff;
   box-shadow: 0 0 8px rgba(106, 106, 255, 0.4);
 }
+
+/* Collapsible <think> blocks in chat — thinking stays visible, just folded. */
+.think-block {
+  margin: 8px 0;
+  border: 1px solid #2c2c34;
+  border-radius: 8px;
+  background: #121218;
+  font-size: 12px;
+}
+.think-block summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  color: #8b8b98;
+  user-select: none;
+}
+.think-block summary:hover { color: #c9c9d4; }
+.think-body {
+  padding: 4px 12px 10px;
+  color: #9a9aa6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-top: 1px solid #232329;
+}

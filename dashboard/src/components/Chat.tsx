@@ -104,6 +104,36 @@ function fileToDataUri(file: File): Promise<string> {
   });
 }
 
+// Render <think>...</think> blocks as collapsible "thinking" sections —
+// nothing is hidden, it just doesn't flood the chat. The rest renders
+// through renderRich (images / file links).
+function renderWithThink(text: string, keyPrefix: string) {
+  const parts: ReactNode[] = [];
+  const re = /<think>([\s\S]*?)(<\/think>|$)/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let k = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last)
+      parts.push(
+        <span key={`${keyPrefix}-x${k++}`}>{renderRich(text.slice(last, m.index), `${keyPrefix}-r${k}`)}</span>
+      );
+    parts.push(
+      <details key={`${keyPrefix}-th${k++}`} className="think-block">
+        <summary>💭 thinking</summary>
+        <div className="think-body">{renderRich(m[1].trim(), `${keyPrefix}-tb${k}`)}</div>
+      </details>
+    );
+    last = m.index + m[0].length;
+    if (!m[2]) break; // unclosed <think> consumed the rest
+  }
+  if (last < text.length)
+    parts.push(
+      <span key={`${keyPrefix}-x${k++}`}>{renderRich(text.slice(last), `${keyPrefix}-r${k}`)}</span>
+    );
+  return parts.length > 0 ? parts : renderRich(text, keyPrefix);
+}
+
 // Memoized so typing in the input (which re-renders Chat on every keystroke)
 // doesn't re-run the base64 regex + re-render every message each time.
 const MessageView = memo(function MessageView({ m, index }: { m: ChatMsg; index: number }) {
@@ -117,7 +147,7 @@ const MessageView = memo(function MessageView({ m, index }: { m: ChatMsg; index:
           {m.role === "user" ? "You" : m.role === "agent" ? "Haley" : "Error"} · {fmtTime(m.time)}
         </span>
       </div>
-      <div className="msg-body">{renderRich(m.text, `m${index}`)}</div>
+      <div className="msg-body">{renderWithThink(m.text, `m${index}`)}</div>
       {m.toolCalls && m.toolCalls.length > 0 && (
         <details className="toolcalls">
           <summary>{m.toolCalls.length} tool call(s)</summary>
@@ -245,8 +275,13 @@ export default function Chat({ conn }: { conn: ConnState }) {
       if (doneEv.type === "error") throw new Error(doneEv.error || "Stream failed");
       // The backend returns {success, final_text, ...} —
       // show ONLY her words, never the raw technical wrapper.
-      const reply =
-        (typeof doneEv.final_text === "string" && doneEv.final_text.trim()) || "…";
+      // If the model returned an empty final text (flaky generation), keep
+      // whatever streamed into the bubble instead of showing a bare "…".
+      const finalRaw =
+        typeof doneEv.final_text === "string" ? doneEv.final_text : "";
+      const streamedSoFar =
+        getSession(sid)?.messages?.slice(-1)[0]?.text?.trim() || "";
+      const reply = finalRaw.trim() || streamedSoFar || "…";
       patchAgent((m) => ({ ...m, text: String(reply) }));
       // Auto-open live browser when the agent browsed — like the assistant's browser.
       if (doneEv.browser_used) setShowBrowser(true);

@@ -15,7 +15,6 @@ interface LiveBrowserProps {
 export default function LiveBrowser({ visible, onClose }: LiveBrowserProps) {
   const [url, setUrl] = useState("");
   const [inputUrl, setInputUrl] = useState("");
-  const [torOn, setTorOn] = useState(false);
   const [loading, setLoading] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
   const [streamKey, setStreamKey] = useState(0);
@@ -34,7 +33,6 @@ export default function LiveBrowser({ visible, onClose }: LiveBrowserProps) {
           // No page loaded — auto-open Google so it's never a black screen
           navigate("https://www.google.com");
         }
-        if (typeof d.tor === "boolean") setTorOn(d.tor);
       })
       .catch(() => {
         // If fetch fails, still try to open Google
@@ -61,17 +59,7 @@ export default function LiveBrowser({ visible, onClose }: LiveBrowserProps) {
     }
   };
 
-  const toggleTor = async () => {
-    try {
-      const d: any = await api.executeTool("browser_tor", { enabled: !torOn });
-      setTorOn(!!(d && (d as any).tor));
-      setStreamKey((k) => k + 1);
-    } catch (e) {
-      console.error("tor toggle failed", e);
-    }
-  };
-
-  const streamUrl = `/api/browser/live?k=${streamKey}`;
+  const streamUrl = `/api/browser/stream?k=${streamKey}`;
 
   return (
     <div
@@ -94,21 +82,6 @@ export default function LiveBrowser({ visible, onClose }: LiveBrowserProps) {
           borderBottom: "1px solid #222",
         }}
       >
-        <button
-          onClick={toggleTor}
-          title="Tor"
-          style={{
-            background: torOn ? "#7c3aed" : "#1a1a1a",
-            color: torOn ? "#fff" : "#888",
-            border: "1px solid #333",
-            borderRadius: 6,
-            padding: "4px 8px",
-            cursor: "pointer",
-            fontSize: 13,
-          }}
-        >
-          🧅
-        </button>
         <input
           value={inputUrl}
           onChange={(e) => setInputUrl(e.target.value)}
@@ -182,22 +155,6 @@ export default function LiveBrowser({ visible, onClose }: LiveBrowserProps) {
           }}
           onError={() => console.error("stream failed")}
         />
-        {torOn && (
-          <div
-            style={{
-              position: "absolute",
-              top: 8,
-              right: 8,
-              background: "rgba(124,58,237,0.9)",
-              color: "#fff",
-              padding: "4px 10px",
-              borderRadius: 6,
-              fontSize: 12,
-            }}
-          >
-            🧅 Tor ON
-          </div>
-        )}
       </div>
 
       {/* Status bar */}
