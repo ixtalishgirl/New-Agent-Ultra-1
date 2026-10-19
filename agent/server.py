@@ -33,6 +33,10 @@ PORT = int(os.environ.get("PORT", "8080"))
 MAX_ROUNDS = 8
 
 TOOL_CALL_RE = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
+# Matches the start of a bare JSON tool call like {"name": "tool_name", ...}
+# when the model forgets the <tool_call> wrapper tags. Decoding is done
+# with json.JSONDecoder().raw_decode so nested braces are handled.
+BARE_TOOL_CALL_START_RE = re.compile(r'\{\s*"name"\s*:\s*"([a-zA-Z0-9_]+)"')
 FINAL_RE = re.compile(r"<final_answer>(.*?)</final_answer>", re.DOTALL)
 
 DASHBOARD_DIR = Path(__file__).resolve().parent.parent / "dashboard" / "dist"
@@ -40,11 +44,28 @@ DASHBOARD_DIR = Path(__file__).resolve().parent.parent / "dashboard" / "dist"
 
 def parse_tool_calls(text: str) -> list:
     calls = []
+    seen = set()
     for m in TOOL_CALL_RE.finditer(text or ""):
         try:
             d = json.loads(m.group(1).strip())
             if isinstance(d, dict) and d.get("name"):
-                calls.append((d["name"], d.get("args") or {}))
+                key = json.dumps(d, sort_keys=True)
+                if key not in seen:
+                    seen.add(key)
+                    calls.append((d["name"], d.get("args") or {}))
+        except Exception:
+            continue
+    # Fallback: the finetuned model sometimes emits a bare JSON tool call
+    # without the <tool_call>...</tool_call> wrapper tags. Accept those too.
+    decoder = json.JSONDecoder()
+    for m in BARE_TOOL_CALL_START_RE.finditer(text or ""):
+        try:
+            d, _ = decoder.raw_decode(text, m.start())
+            if isinstance(d, dict) and d.get("name"):
+                key = json.dumps(d, sort_keys=True)
+                if key not in seen:
+                    seen.add(key)
+                    calls.append((d["name"], d.get("args") or {}))
         except Exception:
             continue
     return calls
