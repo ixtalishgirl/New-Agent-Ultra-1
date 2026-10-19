@@ -69,7 +69,13 @@ def tool_python(code: str, timeout: int = 60) -> dict:
 
 def tool_pip(package: str) -> dict:
     """pip install a package."""
-    return tool_shell(f"pip install {package}", timeout=180)
+    r = tool_shell(f"pip install {package}", timeout=180)
+    # Some systems (Debian/Ubuntu PEP 668) refuse plain pip installs.
+    if not r.get("ok") and "externally-managed-environment" in (
+            r.get("stderr") or ""):
+        r = tool_shell(f"pip install --break-system-packages {package}",
+                       timeout=180)
+    return r
 
 
 def tool_http_get(url: str, timeout: int = 30) -> dict:
@@ -357,9 +363,16 @@ def tool_web_search(query: str, max_results: int = 8) -> dict:
     try:
         import html as _html
         url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote(query)
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=20) as r:
-            page = r.read().decode("utf-8", "replace")
+        # DDG bot-walls plain urllib from servers; a real-browser TLS
+        # fingerprint (curl_cffi, safari) gets the real results page.
+        try:
+            from curl_cffi import requests as _cr
+            r = _cr.get(url, impersonate="safari", timeout=20)
+            page = r.text
+        except ImportError:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                page = resp.read().decode("utf-8", "replace")
         out = []
         for m in re.finditer(
                 r'<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>.*?'
@@ -367,6 +380,9 @@ def tool_web_search(query: str, max_results: int = 8) -> dict:
                 page, re.DOTALL):
             link, title, snip = m.groups()
             clean = lambda s: _html.unescape(re.sub(r"<[^>]+>", "", s)).strip()
+            # DDG wraps links as //duckduckgo.com/l/?uddg=<real url>
+            if "uddg=" in link:
+                link = urllib.parse.unquote(link.split("uddg=", 1)[1].split("&")[0])
             out.append({"title": clean(title), "url": link, "snippet": clean(snip)[:300]})
             if len(out) >= max_results:
                 break
@@ -526,7 +542,24 @@ def tool_currency_conversion(amount: float, from_cur: str, to_cur: str) -> dict:
 def tool_unit_conversion(value: float, from_unit: str, to_unit: str) -> dict:
     """Convert between common units (length, mass, temp, volume, speed, data)."""
     try:
-        f, t = from_unit.lower().strip(), to_unit.lower().strip()
+        # Accept full names too, e.g. kilometers -> km, miles -> mi.
+        aliases = {
+            "millimeter": "mm", "millimeters": "mm", "centimeter": "cm",
+            "centimeters": "cm", "meter": "m", "meters": "m",
+            "kilometer": "km", "kilometers": "km", "inch": "in",
+            "inches": "in", "foot": "ft", "feet": "ft", "yard": "yd",
+            "yards": "yd", "mile": "mi", "miles": "mi",
+            "milligram": "mg", "milligrams": "mg", "gram": "g", "grams": "g",
+            "kilogram": "kg", "kilograms": "kg", "ton": "t", "tons": "t",
+            "ounce": "oz", "ounces": "oz", "pound": "lb", "pounds": "lb",
+            "milliliter": "ml", "milliliters": "ml", "liter": "l",
+            "liters": "l", "litre": "l", "litres": "l",
+            "gallon": "gal", "gallons": "gal",
+            "celsius": "c", "fahrenheit": "f", "kelvin": "k",
+            "kilometers_per_hour": "kmh", "miles_per_hour": "mph",
+        }
+        f = aliases.get(from_unit.lower().strip(), from_unit.lower().strip())
+        t = aliases.get(to_unit.lower().strip(), to_unit.lower().strip())
         length = {"mm": 0.001, "cm": 0.01, "m": 1.0, "km": 1000.0,
                   "in": 0.0254, "ft": 0.3048, "yd": 0.9144, "mi": 1609.344}
         mass = {"mg": 1e-6, "g": 0.001, "kg": 1.0, "t": 1000.0,
@@ -611,21 +644,40 @@ def tool_weather_fetch(lat: float, lon: float) -> dict:
 
 
 def tool_sports_fetch(league: str = "nba") -> dict:
-    """Recent games/scores via balldontlie.io (free, no key)."""
+    """Recent games/scores via ESPN's public scoreboard API (free, no key)."""
     try:
-        url = "https://www.balldontlie.io/api/games?per_page=10"
+        lg = league.lower().strip()
+        mapping = {
+            "nba": ("basketball", "nba"), "wnba": ("basketball", "wnba"),
+            "nfl": ("football", "nfl"), "mlb": ("baseball", "mlb"),
+            "nhl": ("hockey", "nhl"), "mls": ("soccer", "usa.1"),
+            "epl": ("soccer", "eng.1"), "premier": ("soccer", "eng.1"),
+            "laliga": ("soccer", "esp.1"), "ucl": ("soccer", "uefa.champions"),
+        }
+        sport, code = mapping.get(lg, ("basketball", "nba"))
+        url = (f"https://site.api.espn.com/apis/site/v2/sports/"
+               f"{sport}/{code}/scoreboard")
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=20) as r:
             data = json.loads(r.read().decode("utf-8"))
         games = []
-        for g in data.get("data", [])[:10]:
+        for e in data.get("events", [])[:10]:
+            comp = (e.get("competitions") or [{}])[0]
+            teams = {}
+            for c in comp.get("competitors", []):
+                abbr = c.get("team", {}).get("abbreviation", "?")
+                teams[c.get("homeAway", "?")] = {
+                    "abbr": abbr, "score": c.get("score"),
+                    "winner": c.get("winner"),
+                }
             games.append({
-                "date": g.get("date", "")[:10],
-                "home": g["home_team"]["abbreviation"],
-                "away": g["visitor_team"]["abbreviation"],
-                "home_score": g.get("home_team_score"),
-                "away_score": g.get("visitor_team_score"),
-                "status": g.get("status"),
+                "date": (e.get("date") or "")[:10],
+                "name": e.get("name", ""),
+                "status": comp.get("status", {}).get("type", {}).get("shortDetail", ""),
+                "home": teams.get("home", {}).get("abbr"),
+                "away": teams.get("away", {}).get("abbr"),
+                "home_score": teams.get("home", {}).get("score"),
+                "away_score": teams.get("away", {}).get("score"),
             })
         return _ok(league=league, games=games)
     except Exception as e:
@@ -806,7 +858,8 @@ def tool_flaresolverr_fetch(url: str, solver_url: str = "http://localhost:8191")
         return _ok(status=sol.get("status"), url=sol.get("url", url),
                    text=(sol.get("response") or "")[:5000])
     except Exception as e:
-        return _err(f"FlareSolverr failed (is it running at {solver_url}?): {e}")
+        return _err(f"FlareSolverr not reachable at {solver_url} "
+                    f"(no FlareSolverr server configured there): {e}")
 
 
 def tool_api_discover(url: str, timeout: int = 30) -> dict:

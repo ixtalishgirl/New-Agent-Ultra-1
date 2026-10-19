@@ -4,3 +4,4 @@ psycopg2-binary>=2.9.0  # direct Postgres for supabase_query (CREATE TABLE etc.)
 firebase-admin>=6.0.0   # Firestore: agent memory/data store over HTTPS
 # Optional (install only if needed for full powers):
 # requests        # used only if stdlib urllib is insufficient
+curl-cffi>=0.7.0     # browser-TLS impersonation (web_search vs bot walls)
