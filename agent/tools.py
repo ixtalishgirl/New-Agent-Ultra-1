@@ -248,8 +248,9 @@ def _browser_call(fn, *args, **kwargs):
                                   daemon=True, name="browser-worker")
             t.start()
             _browser_worker = t
+        q = _browser_queue  # captured under lock; close() may replace it after
     reply = _queue.Queue()
-    _browser_queue.put({"fn": fn, "args": args, "kwargs": kwargs, "reply": reply})
+    q.put({"fn": fn, "args": args, "kwargs": kwargs, "reply": reply})
     try:
         ok, val = reply.get(timeout=180)
     except _queue.Empty:
@@ -365,53 +366,6 @@ def _ensure_browser_binary():
         return p.returncode == 0
     except Exception:
         return False
-
-
-def _get_browser():
-    """Launch once, reuse forever. headless-shell = ~100MB vs ~170MB full."""
-    global _browser
-    if _browser is not None:
-        return _browser
-    from playwright.sync_api import sync_playwright
-    pw = sync_playwright().start()
-    # Try headless-shell first (lightest); fall back to full chromium.
-    browser = None
-    last_err = None
-    launch_args = [
-        "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
-        "--disable-extensions", "--disable-background-networking",
-        "--disable-sync", "--mute-audio",
-    ]
-    for kwargs in ({"channel": "chromium-headless-shell"}, {}):
-        try:
-            browser = pw.chromium.launch(headless=True, args=launch_args, **kwargs)
-            break
-        except Exception as e:
-            last_err = e
-            # Binary missing? Install it once, then retry this variant.
-            if "Executable doesn't exist" in str(e) or "executable" in str(e).lower():
-                if _ensure_browser_binary():
-                    try:
-                        browser = pw.chromium.launch(headless=True, args=launch_args, **kwargs)
-                        break
-                    except Exception as e2:
-                        last_err = e2
-    if browser is None:
-        raise RuntimeError(f"browser launch failed: {last_err}")
-    ctx = browser.new_context(viewport={"width": 800, "height": 600})
-    page = ctx.new_page()
-
-    # Block heavy resources by default — pages load 3-5x faster.
-    def _route(route):
-        if route.request.resource_type in ("image", "font", "media"):
-            route.abort()
-        else:
-            route.continue_()
-    page.route("**/*", _route)
-    page.set_default_timeout(15000)
-    page.set_default_navigation_timeout(15000)
-    _browser = (pw, browser, page)
-    return _browser
 
 
 def tool_browser_navigate(url: str, timeout: int = 15) -> dict:

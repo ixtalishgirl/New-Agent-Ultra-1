@@ -282,11 +282,7 @@ class Handler(BaseHTTPRequestHandler):
                 {"name": n, "description": d, "args": a}
                 for n, (fn, d, a) in sorted(tools.REGISTRY.items())]})
         if path == "/api/browser/current":
-            try:
-                _, _, page = tools._get_browser()
-                return self._json({"url": page.url})
-            except Exception:
-                return self._json({"url": ""})
+            return self._json({"url": tools.browser_current_url()})
         if path == "/api/browser/stream":
             return self._mjpeg()
         if path == "/api/permissions":
