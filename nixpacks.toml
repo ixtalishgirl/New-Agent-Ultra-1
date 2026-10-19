@@ -1,0 +1,13 @@
+# Railway (Nixpacks) build config — installs the Playwright browser at build time
+# so the agent's live browser works immediately at runtime.
+[phases.setup]
+nixPkgs = ["python3", "pip", "chromium"]
+
+[phases.install]
+cmds = [
+  "pip install -r requirements.txt",
+  "python3 -m playwright install --with-deps chromium || python3 -m playwright install chromium || true",
+]
+
+[start]
+cmd = "python3 -m agent.server"

@@ -137,6 +137,18 @@ def tool_file_delete(path: str, confirm: bool = False) -> dict:
 _browser = None
 
 
+def _ensure_browser_binary():
+    """Install the Playwright browser binary if missing (first-use auto-install)."""
+    try:
+        p = subprocess.run(
+            ["python3", "-m", "playwright", "install", "chromium"],
+            capture_output=True, text=True, timeout=600,
+        )
+        return p.returncode == 0
+    except Exception:
+        return False
+
+
 def _get_browser():
     """Launch once, reuse forever. headless-shell = ~100MB vs ~170MB full."""
     global _browser
@@ -147,16 +159,25 @@ def _get_browser():
     # Try headless-shell first (lightest); fall back to full chromium.
     browser = None
     last_err = None
+    launch_args = [
+        "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
+        "--disable-extensions", "--disable-background-networking",
+        "--disable-sync", "--mute-audio",
+    ]
     for kwargs in ({"channel": "chromium-headless-shell"}, {}):
         try:
-            browser = pw.chromium.launch(headless=True, args=[
-                "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
-                "--disable-extensions", "--disable-background-networking",
-                "--disable-sync", "--mute-audio",
-            ], **kwargs)
+            browser = pw.chromium.launch(headless=True, args=launch_args, **kwargs)
             break
         except Exception as e:
             last_err = e
+            # Binary missing? Install it once, then retry this variant.
+            if "Executable doesn't exist" in str(e) or "executable" in str(e).lower():
+                if _ensure_browser_binary():
+                    try:
+                        browser = pw.chromium.launch(headless=True, args=launch_args, **kwargs)
+                        break
+                    except Exception as e2:
+                        last_err = e2
     if browser is None:
         raise RuntimeError(f"browser launch failed: {last_err}")
     ctx = browser.new_context(viewport={"width": 800, "height": 600})
