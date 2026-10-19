@@ -231,7 +231,8 @@ def _browser_worker_main(q):
     page.set_default_timeout(15000)
     page.set_default_navigation_timeout(15000)
 
-    state = {"pw": pw, "browser": browser, "context": ctx, "page": page}
+    state = {"pw": pw, "browser": browser, "context": ctx, "page": page,
+             "xvfb": xvfb}
     while True:
         job = q.get()
         try:
@@ -528,6 +529,17 @@ def _shutdown_impl(state):
         pass
     try:
         state["pw"].stop()
+    except Exception:
+        pass
+    # Kill the Xvfb virtual display (was leaked on every restart).
+    try:
+        xvfb = state.get("xvfb")
+        if xvfb is not None:
+            xvfb.terminate()
+            try:
+                xvfb.wait(timeout=5)
+            except Exception:
+                xvfb.kill()
     except Exception:
         pass
     raise _WorkerExit()
