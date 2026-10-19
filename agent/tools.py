@@ -262,10 +262,19 @@ def _browser_call(fn, *args, **kwargs):
         q = _browser_queue  # captured under lock; close() may replace it after
     reply = _queue.Queue()
     q.put({"fn": fn, "args": args, "kwargs": kwargs, "reply": reply})
+    _t0 = time.monotonic()
     try:
         ok, val = reply.get(timeout=180)
     except _queue.Empty:
         raise RuntimeError("browser job timed out after 180s")
+    finally:
+        # Structured timing log for every browser tool call (stderr, no secrets).
+        try:
+            _el_ms = int((time.monotonic() - _t0) * 1000)
+            print(f"[browser-timing] tool={getattr(fn, '__name__', '?')} elapsed_ms={_el_ms}",
+                  file=sys.stderr, flush=True)
+        except Exception:
+            pass
     if ok:
         return val
     if _browser_dead(val):
@@ -276,8 +285,17 @@ def _browser_call(fn, *args, **kwargs):
 
 def _nav_impl(state, url, timeout):
     page = state["page"]
-    page.goto(url, timeout=timeout * 1000, wait_until="domcontentloaded")
-    return {"url": page.url, "title": page.title()[:200]}
+    # Bounded retry with backoff for transient navigation failures (max 2 tries).
+    last_err = None
+    for attempt in range(2):
+        try:
+            page.goto(url, timeout=timeout * 1000, wait_until="domcontentloaded")
+            return {"url": page.url, "title": page.title()[:200]}
+        except Exception as e:
+            last_err = e
+            if attempt == 0:
+                time.sleep(1.0)
+    raise last_err
 
 
 def _shot_impl(state, full_page, high_quality):
@@ -303,19 +321,23 @@ def _see_impl(state):
     page = state["page"]
     buf = page.screenshot()
     text = page.inner_text("body")[:6000]
-    interactive = []
+    # Single batched JS evaluate (was ~180 separate round-trips for 60 elements).
     try:
-        for el in page.locator("a, button, input, select, textarea, [role=button]").all()[:60]:
-            try:
-                role = el.evaluate("e => e.tagName.toLowerCase()")
-                name = (el.inner_text() or el.get_attribute("aria-label")
-                        or el.get_attribute("placeholder") or el.get_attribute("name") or "")[:60]
-                if name.strip():
-                    interactive.append(f"{role}: {name.strip()}")
-            except Exception:
-                continue
+        interactive = page.evaluate("""() => {
+            const out = [];
+            const els = document.querySelectorAll(
+                "a, button, input, select, textarea, [role=button]");
+            for (let i = 0; i < Math.min(els.length, 60); i++) {
+                const e = els[i];
+                const name = (e.innerText || e.getAttribute("aria-label") ||
+                              e.getAttribute("placeholder") ||
+                              e.getAttribute("name") || "").trim().slice(0, 60);
+                if (name) out.push(e.tagName.toLowerCase() + ": " + name);
+            }
+            return out;
+        }""")
     except Exception:
-        pass
+        interactive = []
     return {
         "url": page.url, "title": page.title()[:200],
         "screenshot": "data:image/png;base64," + base64.b64encode(buf).decode(),
@@ -334,7 +356,13 @@ def _click_impl(state, selector, timeout):
     el = page.locator(selector).first
     el.wait_for(state="visible", timeout=timeout * 1000)
     el.click(timeout=timeout * 1000)
-    page.wait_for_timeout(1500)
+    # Event-based settle (was fixed 1500ms): returns as soon as DOM is ready,
+    # capped at 2s so a hung page can't stall the tool.
+    try:
+        page.wait_for_function("document.readyState === 'complete'", timeout=2000)
+    except Exception:
+        pass
+    page.wait_for_timeout(250)
     return {"url": page.url, "title": page.title()[:200], "clicked": selector}
 
 
@@ -369,7 +397,13 @@ def _press_impl(state, key, selector, timeout):
         el.press(key, timeout=timeout * 1000)
     else:
         page.keyboard.press(key)
-    page.wait_for_timeout(800)
+    # Event-based settle (was fixed 800ms): returns as soon as DOM is ready,
+    # capped at 1.5s so a hung page can't stall the tool.
+    try:
+        page.wait_for_function("document.readyState === 'complete'", timeout=1500)
+    except Exception:
+        pass
+    page.wait_for_timeout(200)
     return {"url": page.url, "pressed": key}
 
 
