@@ -170,18 +170,29 @@ class _WorkerExit(Exception):
 
 def _browser_worker_main(q):
     """Owns pw/browser/page forever; runs jobs from the queue."""
+    import os, subprocess, time
+    # Start virtual display for headed Chrome (legitimate real browser)
+    xvfb = None
+    try:
+        xvfb = subprocess.Popen(["Xvfb", ":99", "-screen", "0", "1280x800x24"],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(1)
+        os.environ["DISPLAY"] = ":99"
+    except Exception:
+        pass  # fall back to headless if xvfb unavailable
     from playwright.sync_api import sync_playwright
     pw = sync_playwright().start()
     browser = None
     last_err = None
+    headed = xvfb is not None
     launch_args = [
-        "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
+        "--no-sandbox", "--disable-dev-shm-usage",
         "--disable-extensions", "--disable-background-networking",
         "--disable-sync", "--mute-audio",
     ]
     for kwargs in ({"channel": "chrome"}, {"channel": "chromium"}, {}):
         try:
-            browser = pw.chromium.launch(headless=True, args=launch_args, **kwargs)
+            browser = pw.chromium.launch(headless=not headed, args=launch_args, **kwargs)
             break
         except Exception as e:
             last_err = e
@@ -427,7 +438,7 @@ def _ensure_browser_binary():
                 "libatk1.0-0", "libatk-bridge2.0-0", "libcups2", "libdrm2",
                 "libxkbcommon0", "libxcomposite1", "libxdamage1", "libxfixes3",
                 "libxrandr2", "libgbm1", "libpango-1.0-0", "libcairo2",
-                "libasound2"]
+                "libasound2", "xvfb"]
         subprocess.run(["apt-get", "update", "-qq"], capture_output=True, timeout=120)
         subprocess.run(["apt-get", "install", "-y", "-qq"] + deps,
                        capture_output=True, timeout=600)
