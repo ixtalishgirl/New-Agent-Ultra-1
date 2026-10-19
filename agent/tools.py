@@ -144,8 +144,17 @@ _browser = None
 
 
 def _ensure_browser_binary():
-    """Install the Playwright browser binary if missing (first-use auto-install)."""
+    """Install the Playwright browser binary + system deps if missing (first-use auto-install)."""
     try:
+        # System libraries Chromium needs (Debian/Ubuntu). Railway runs as root.
+        deps = ["libglib2.0-0", "libnss3", "libnspr4", "libdbus-1-3",
+                "libatk1.0-0", "libatk-bridge2.0-0", "libcups2", "libdrm2",
+                "libxkbcommon0", "libxcomposite1", "libxdamage1", "libxfixes3",
+                "libxrandr2", "libgbm1", "libpango-1.0-0", "libcairo2",
+                "libasound2"]
+        subprocess.run(["apt-get", "update", "-qq"], capture_output=True, timeout=120)
+        subprocess.run(["apt-get", "install", "-y", "-qq"] + deps,
+                       capture_output=True, timeout=600)
         p = subprocess.run(
             ["python3", "-m", "playwright", "install", "chromium"],
             capture_output=True, text=True, timeout=600,
