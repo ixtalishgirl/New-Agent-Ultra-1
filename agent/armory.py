@@ -32,7 +32,8 @@ def _err(msg):
 
 def _need(modname, pipname=""):
     try:
-        return __import__(modname)
+        import importlib
+        return importlib.import_module(modname)
     except ImportError:
         raise RuntimeError(
             f"library '{modname}' not installed"
